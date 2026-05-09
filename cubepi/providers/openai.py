@@ -216,7 +216,7 @@ class OpenAIProvider:
                 ms.push(StreamEvent(type="done"))
                 ms.set_result(partial)
 
-            except Exception as exc:
+            except BaseException as exc:
                 error_msg = AssistantMessage(
                     content=[],
                     stop_reason="error",
@@ -226,6 +226,8 @@ class OpenAIProvider:
                 )
                 ms.push(StreamEvent(type="error", error_message=str(exc)))
                 ms.set_result(error_msg)
+                if not isinstance(exc, Exception):
+                    raise
 
         asyncio.create_task(_produce())
         return ms
@@ -241,8 +243,7 @@ class OpenAIProvider:
             tool_calls = [c for c in msg.content if isinstance(c, ToolCall)]
 
             result: dict[str, Any] = {"role": "assistant"}
-            if text_parts:
-                result["content"] = "\n".join(text_parts)
+            result["content"] = "\n".join(text_parts) if text_parts else None
             if tool_calls:
                 result["tool_calls"] = [
                     {

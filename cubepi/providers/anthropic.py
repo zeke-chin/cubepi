@@ -93,7 +93,7 @@ class AnthropicProvider:
                     ms.push(StreamEvent(type="done"))
                     ms.set_result(result)
 
-            except Exception as exc:
+            except BaseException as exc:
                 error_msg = AssistantMessage(
                     content=[],
                     stop_reason="error",
@@ -103,6 +103,8 @@ class AnthropicProvider:
                 )
                 ms.push(StreamEvent(type="error", error_message=str(exc)))
                 ms.set_result(error_msg)
+                if not isinstance(exc, Exception):
+                    raise
 
         asyncio.create_task(_produce())
         return ms

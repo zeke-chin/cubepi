@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any
 
@@ -12,6 +13,7 @@ class SQLiteCheckpointer:
     def __init__(self, db_path: str) -> None:
         self._db_path = db_path
         self._db: aiosqlite.Connection | None = None
+        self._lock = asyncio.Lock()
 
     async def __aenter__(self) -> SQLiteCheckpointer:
         self._db = await aiosqlite.connect(self._db_path)
@@ -39,64 +41,62 @@ class SQLiteCheckpointer:
 
     async def load(self, thread_id: str) -> CheckpointData | None:
         assert self._db is not None
-        cursor = await self._db.execute(
-            "SELECT message_json FROM messages WHERE thread_id = ? ORDER BY id",
-            (thread_id,),
-        )
-        rows = await cursor.fetchall()
-        if not rows:
+        async with self._lock:
+            cursor = await self._db.execute(
+                "SELECT message_json FROM messages WHERE thread_id = ? ORDER BY id",
+                (thread_id,),
+            )
+            rows = await cursor.fetchall()
+
             extra_cursor = await self._db.execute(
                 "SELECT extra_json FROM thread_extra WHERE thread_id = ?",
                 (thread_id,),
             )
             extra_row = await extra_cursor.fetchone()
-            if not extra_row:
+
+            if not rows and not extra_row:
                 return None
 
-        messages = []
-        for row in rows:
-            msg_data = json.loads(row[0])
-            messages.append(_deserialize_message(msg_data))
+            messages = []
+            for row in rows:
+                msg_data = json.loads(row[0])
+                messages.append(_deserialize_message(msg_data))
 
-        extra_cursor = await self._db.execute(
-            "SELECT extra_json FROM thread_extra WHERE thread_id = ?",
-            (thread_id,),
-        )
-        extra_row = await extra_cursor.fetchone()
-        extra = json.loads(extra_row[0]) if extra_row else {}
-
-        return CheckpointData(messages=messages, extra=extra)
+            extra = json.loads(extra_row[0]) if extra_row else {}
+            return CheckpointData(messages=messages, extra=extra)
 
     async def append(self, thread_id: str, messages: list[Any]) -> None:
         assert self._db is not None
-        for msg in messages:
-            msg_json = _serialize_message(msg)
-            await self._db.execute(
-                "INSERT INTO messages (thread_id, message_json) VALUES (?, ?)",
-                (thread_id, msg_json),
-            )
-        await self._db.commit()
+        async with self._lock:
+            for msg in messages:
+                msg_json = _serialize_message(msg)
+                await self._db.execute(
+                    "INSERT INTO messages (thread_id, message_json) VALUES (?, ?)",
+                    (thread_id, msg_json),
+                )
+            await self._db.commit()
 
     async def save_extra(self, thread_id: str, extra: dict[str, Any]) -> None:
         assert self._db is not None
-        existing_cursor = await self._db.execute(
-            "SELECT extra_json FROM thread_extra WHERE thread_id = ?",
-            (thread_id,),
-        )
-        existing_row = await existing_cursor.fetchone()
-        if existing_row:
-            existing_extra = json.loads(existing_row[0])
-            existing_extra.update(extra)
-            await self._db.execute(
-                "UPDATE thread_extra SET extra_json = ? WHERE thread_id = ?",
-                (json.dumps(existing_extra), thread_id),
+        async with self._lock:
+            existing_cursor = await self._db.execute(
+                "SELECT extra_json FROM thread_extra WHERE thread_id = ?",
+                (thread_id,),
             )
-        else:
-            await self._db.execute(
-                "INSERT INTO thread_extra (thread_id, extra_json) VALUES (?, ?)",
-                (thread_id, json.dumps(extra)),
-            )
-        await self._db.commit()
+            existing_row = await existing_cursor.fetchone()
+            if existing_row:
+                existing_extra = json.loads(existing_row[0])
+                existing_extra.update(extra)
+                await self._db.execute(
+                    "UPDATE thread_extra SET extra_json = ? WHERE thread_id = ?",
+                    (json.dumps(existing_extra), thread_id),
+                )
+            else:
+                await self._db.execute(
+                    "INSERT INTO thread_extra (thread_id, extra_json) VALUES (?, ?)",
+                    (thread_id, json.dumps(extra)),
+                )
+            await self._db.commit()
 
 
 def _serialize_message(msg: Any) -> str:

@@ -30,6 +30,7 @@ class TestOpenAIMessageConversion:
         )
         result = OpenAIProvider._convert_message(msg)
         assert result["role"] == "assistant"
+        assert result["content"] is None
         assert len(result["tool_calls"]) == 1
         assert result["tool_calls"][0]["id"] == "tc-1"
         assert result["tool_calls"][0]["function"]["name"] == "search"
