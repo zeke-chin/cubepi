@@ -16,8 +16,8 @@ Inspired by [pi-agent-core](https://github.com/anthropics/pi-agent-core) (TypeSc
 | **Dependencies** | Pulls in langchain-core, langgraph-sdk, and transitive deps | 3 core deps: `pydantic`, `anthropic`, `openai` |
 | **Tool execution** | Tools are graph nodes with manual wiring | Declare tools as functions, framework handles routing and parallel execution |
 | **Multi-provider** | Via langchain chat model adapters | Native Provider protocol — Anthropic, OpenAI built in, add your own with one class |
-| **Middleware** | Not built in — use langchain callbacks or custom graph nodes | First-class middleware protocol with 5 composable hooks |
-| **Debuggability** | Trace through graph execution, channel updates, checkpoint diffs | Linear execution flow — set a breakpoint in the loop, see exactly what's happening |
+| **Middleware** | Graph-level middleware on node entry/exit | Agent-level middleware with 5 typed hooks and declarative composition rules |
+| **Observability** | LangSmith / Langfuse integration, full trace visualization | Events + middleware hooks — bring your own tracing |
 
 ### vs pi-agent-core
 
