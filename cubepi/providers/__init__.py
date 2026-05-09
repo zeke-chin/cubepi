@@ -17,16 +17,25 @@ from cubepi.providers.base import (
     Usage,
     UserMessage,
 )
-from cubepi.providers.faux import FauxProvider, faux_assistant_message, faux_text, faux_thinking, faux_tool_call
+from cubepi.providers.faux import (
+    FauxProvider,
+    faux_assistant_message,
+    faux_text,
+    faux_thinking,
+    faux_tool_call,
+)
 
 
 # Lazy imports for optional providers
 def get_anthropic_provider():
     from cubepi.providers.anthropic import AnthropicProvider
+
     return AnthropicProvider
+
 
 def get_openai_provider():
     from cubepi.providers.openai import OpenAIProvider
+
     return OpenAIProvider
 
 

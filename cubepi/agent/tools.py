@@ -9,12 +9,10 @@ from pydantic import ValidationError
 
 from cubepi.agent.types import (
     AfterToolCallContext,
-    AfterToolCallResult,
     AgentContext,
     AgentTool,
     AgentToolResult,
     BeforeToolCallContext,
-    BeforeToolCallResult,
     MessageEndEvent,
     MessageStartEvent,
     ToolExecutionEndEvent,
@@ -200,9 +198,7 @@ async def _finalize(
 
 
 def _should_terminate(finalized: list[_FinalizedOutcome]) -> bool:
-    return len(finalized) > 0 and all(
-        f.result.terminate is True for f in finalized
-    )
+    return len(finalized) > 0 and all(f.result.terminate is True for f in finalized)
 
 
 async def execute_tool_calls(
@@ -215,9 +211,7 @@ async def execute_tool_calls(
     signal: asyncio.Event | None = None,
     emit: Callable,
 ) -> ToolCallBatch:
-    tool_calls = [
-        c for c in assistant_message.content if isinstance(c, ToolCall)
-    ]
+    tool_calls = [c for c in assistant_message.content if isinstance(c, ToolCall)]
 
     has_sequential = any(
         t.execution_mode == "sequential"
@@ -305,9 +299,7 @@ async def _execute_sequential(
         finalized_list.append(finalized)
         messages.append(tool_msg)
 
-    return ToolCallBatch(
-        messages=messages, terminate=_should_terminate(finalized_list)
-    )
+    return ToolCallBatch(messages=messages, terminate=_should_terminate(finalized_list))
 
 
 async def _execute_parallel(
@@ -352,9 +344,7 @@ async def _execute_parallel(
         else:
 
             async def _run(prep=preparation):
-                result, is_error = await _execute_prepared(
-                    prep, signal, emit_fn
-                )
+                result, is_error = await _execute_prepared(prep, signal, emit_fn)
                 fin = await _finalize(
                     context,
                     assistant_message,
@@ -391,6 +381,4 @@ async def _execute_parallel(
         await _emit(emit_fn, MessageEndEvent(message=tool_msg))
         messages.append(tool_msg)
 
-    return ToolCallBatch(
-        messages=messages, terminate=_should_terminate(finalized_list)
-    )
+    return ToolCallBatch(messages=messages, terminate=_should_terminate(finalized_list))

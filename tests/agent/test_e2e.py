@@ -3,7 +3,7 @@ import asyncio
 from pydantic import BaseModel
 
 from cubepi.agent.agent import Agent
-from cubepi.agent.types import AgentEvent, AgentTool, AgentToolResult
+from cubepi.agent.types import AgentTool, AgentToolResult
 from cubepi.providers.base import (
     AssistantMessage,
     Model,
@@ -67,16 +67,20 @@ class TestE2EBasic:
 
     async def test_tool_execution_with_pending_tracking(self):
         provider = FauxProvider()
-        provider.set_responses([
-            faux_assistant_message(
-                [
-                    faux_text("Let me calculate that."),
-                    faux_tool_call("calculate", {"expression": "123 * 456"}, id="calc-1"),
-                ],
-                stop_reason="tool_use",
-            ),
-            faux_assistant_message("The result is 56088."),
-        ])
+        provider.set_responses(
+            [
+                faux_assistant_message(
+                    [
+                        faux_text("Let me calculate that."),
+                        faux_tool_call(
+                            "calculate", {"expression": "123 * 456"}, id="calc-1"
+                        ),
+                    ],
+                    stop_reason="tool_use",
+                ),
+                faux_assistant_message("The result is 56088."),
+            ]
+        )
         agent = Agent(
             provider=provider,
             model=make_model(),
@@ -85,10 +89,15 @@ class TestE2EBasic:
         )
 
         pending_events = []
-        agent.subscribe(lambda e, s=None: (
-            pending_events.append({"type": e.type, "ids": list(agent.state.pending_tool_calls)})
-            if e.type in ("tool_execution_start", "tool_execution_end") else None
-        ))
+        agent.subscribe(
+            lambda e, s=None: (
+                pending_events.append(
+                    {"type": e.type, "ids": list(agent.state.pending_tool_calls)}
+                )
+                if e.type in ("tool_execution_start", "tool_execution_end")
+                else None
+            )
+        )
 
         await agent.prompt("Calculate 123 * 456")
 
@@ -99,12 +108,16 @@ class TestE2EBasic:
         assert agent.state.pending_tool_calls == set()
 
     async def test_abort_during_streaming(self):
-        provider = FauxProvider(tokens_per_second=20, token_size_min=2, token_size_max=2)
-        provider.set_responses([
-            faux_assistant_message(
-                "one two three four five six seven eight nine ten eleven twelve thirteen"
-            ),
-        ])
+        provider = FauxProvider(
+            tokens_per_second=20, token_size_min=2, token_size_max=2
+        )
+        provider.set_responses(
+            [
+                faux_assistant_message(
+                    "one two three four five six seven eight nine ten eleven twelve thirteen"
+                ),
+            ]
+        )
         agent = Agent(provider=provider, model=make_model())
 
         prompt_task = asyncio.create_task(agent.prompt("Count"))
@@ -135,20 +148,24 @@ class TestE2EBasic:
 
     async def test_context_across_multiple_turns(self):
         provider = FauxProvider()
-        provider.set_responses([
-            faux_assistant_message("Nice to meet you, Alice."),
-            lambda msgs, model: faux_assistant_message(
-                "Your name is Alice."
-                if any(
-                    hasattr(m, "content")
-                    and isinstance(m.content, list)
-                    and any(hasattr(c, "text") and "Alice" in c.text for c in m.content)
-                    for m in msgs
-                    if hasattr(m, "role") and m.role == "user"
-                )
-                else "I don't know your name."
-            ),
-        ])
+        provider.set_responses(
+            [
+                faux_assistant_message("Nice to meet you, Alice."),
+                lambda msgs, model: faux_assistant_message(
+                    "Your name is Alice."
+                    if any(
+                        hasattr(m, "content")
+                        and isinstance(m.content, list)
+                        and any(
+                            hasattr(c, "text") and "Alice" in c.text for c in m.content
+                        )
+                        for m in msgs
+                        if hasattr(m, "role") and m.role == "user"
+                    )
+                    else "I don't know your name."
+                ),
+            ]
+        )
         agent = Agent(provider=provider, model=make_model())
 
         await agent.prompt("My name is Alice.")
@@ -160,9 +177,11 @@ class TestE2EBasic:
 
     async def test_thinking_content_preserved(self):
         provider = FauxProvider()
-        provider.set_responses([
-            faux_assistant_message([faux_thinking("step by step"), faux_text("4")]),
-        ])
+        provider.set_responses(
+            [
+                faux_assistant_message([faux_thinking("step by step"), faux_text("4")]),
+            ]
+        )
         agent = Agent(
             provider=provider,
             model=Model(id="faux-reasoning", provider="faux", reasoning=True),
@@ -218,7 +237,9 @@ class TestE2EResume:
             AssistantMessage(
                 content=[
                     TextContent(text="Let me calculate."),
-                    ToolCall(id="calc-1", name="calculate", arguments={"expression": "5 + 3"}),
+                    ToolCall(
+                        id="calc-1", name="calculate", arguments={"expression": "5 + 3"}
+                    ),
                 ],
                 stop_reason="tool_use",
             ),

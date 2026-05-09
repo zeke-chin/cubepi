@@ -1,5 +1,3 @@
-from typing import Any
-
 from cubepi.middleware.base import Middleware, compose_middleware
 from cubepi.agent.types import (
     AfterToolCallResult,
@@ -12,10 +10,8 @@ from cubepi.agent.types import (
 )
 from cubepi.providers.base import (
     AssistantMessage,
-    Message,
     TextContent,
     ToolCall,
-    ToolResultMessage,
     UserMessage,
 )
 
@@ -30,14 +26,20 @@ class TestTransformContext:
     async def test_chained_transform_context(self):
         class AddPrefix(Middleware):
             async def transform_context(self, messages, *, signal=None):
-                return [UserMessage(content=[TextContent(text="PREFIX")])] + list(messages)
+                return [UserMessage(content=[TextContent(text="PREFIX")])] + list(
+                    messages
+                )
 
         class AddSuffix(Middleware):
             async def transform_context(self, messages, *, signal=None):
-                return list(messages) + [UserMessage(content=[TextContent(text="SUFFIX")])]
+                return list(messages) + [
+                    UserMessage(content=[TextContent(text="SUFFIX")])
+                ]
 
         hooks = compose_middleware([AddPrefix(), AddSuffix()])
-        result = await hooks["transform_context"]([UserMessage(content=[TextContent(text="middle")])], signal=None)
+        result = await hooks["transform_context"](
+            [UserMessage(content=[TextContent(text="middle")])], signal=None
+        )
 
         assert len(result) == 3
         assert result[0].content[0].text == "PREFIX"

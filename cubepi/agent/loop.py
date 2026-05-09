@@ -1,17 +1,13 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Awaitable, Callable
+from typing import Any, Callable
 
-from cubepi.agent.tools import ToolCallBatch, execute_tool_calls
+from cubepi.agent.tools import execute_tool_calls
 from cubepi.agent.types import (
     AgentContext,
     AgentEndEvent,
-    AgentEvent,
-    AgentEventSink,
     AgentStartEvent,
-    AgentTool,
-    BeforeToolCallResult,
     MessageEndEvent,
     MessageStartEvent,
     MessageUpdateEvent,
@@ -21,11 +17,8 @@ from cubepi.agent.types import (
 )
 from cubepi.providers.base import (
     AssistantMessage,
-    Message,
-    MessageStream,
     Model,
     Provider,
-    StreamEvent,
     ThinkingLevel,
     ToolCall,
     ToolResultMessage,
@@ -59,7 +52,9 @@ async def run_agent_loop(
 ) -> list[Any]:
     new_messages: list[Any] = list(prompts)
     current_context = AgentContext(
-        system_prompt=system_prompt if system_prompt is not None else context.system_prompt,
+        system_prompt=system_prompt
+        if system_prompt is not None
+        else context.system_prompt,
         messages=list(context.messages) + list(prompts),
         tools=context.tools,
     )
@@ -113,7 +108,9 @@ async def run_agent_loop_continue(
 
     new_messages: list[Any] = []
     current_context = AgentContext(
-        system_prompt=system_prompt if system_prompt is not None else context.system_prompt,
+        system_prompt=system_prompt
+        if system_prompt is not None
+        else context.system_prompt,
         messages=list(context.messages),
         tools=context.tools,
     )
@@ -171,8 +168,14 @@ async def _run_loop(
                 first_turn = False
 
             message = await _stream_assistant_response(
-                current_context, provider, model, convert_to_llm,
-                transform_context, thinking, signal, emit,
+                current_context,
+                provider,
+                model,
+                convert_to_llm,
+                transform_context,
+                thinking,
+                signal,
+                emit,
             )
             new_messages.append(message)
 
@@ -187,7 +190,8 @@ async def _run_loop(
 
             if tool_calls:
                 batch = await execute_tool_calls(
-                    current_context, message,
+                    current_context,
+                    message,
                     tool_execution=tool_execution,
                     before_tool_call=before_tool_call,
                     after_tool_call=after_tool_call,
@@ -264,7 +268,8 @@ async def _stream_assistant_response(
         tools_defs = [t.to_definition() for t in context.tools]
 
     stream = await provider.stream(
-        model, llm_messages,
+        model,
+        llm_messages,
         system_prompt=context.system_prompt,
         tools=tools_defs,
         thinking=thinking,
@@ -280,20 +285,32 @@ async def _stream_assistant_response(
             if partial_message:
                 context.messages.append(partial_message)
                 added_partial = True
-                await _emit(emit, MessageStartEvent(message=partial_message.model_copy(deep=True)))
+                await _emit(
+                    emit,
+                    MessageStartEvent(message=partial_message.model_copy(deep=True)),
+                )
 
         elif event.type in (
-            "text_start", "text_delta", "text_end",
-            "thinking_start", "thinking_delta", "thinking_end",
-            "toolcall_start", "toolcall_delta", "toolcall_end",
+            "text_start",
+            "text_delta",
+            "text_end",
+            "thinking_start",
+            "thinking_delta",
+            "thinking_end",
+            "toolcall_start",
+            "toolcall_delta",
+            "toolcall_end",
         ):
             if partial_message and event.partial:
                 partial_message = event.partial
                 context.messages[-1] = partial_message
-                await _emit(emit, MessageUpdateEvent(
-                    message=partial_message.model_copy(deep=True),
-                    stream_event=event,
-                ))
+                await _emit(
+                    emit,
+                    MessageUpdateEvent(
+                        message=partial_message.model_copy(deep=True),
+                        stream_event=event,
+                    ),
+                )
 
         elif event.type in ("done", "error"):
             final_message = await stream.result()

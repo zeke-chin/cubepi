@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Generic, Literal, TypeVar
 
 from pydantic import BaseModel
@@ -9,11 +9,7 @@ from pydantic import BaseModel
 from cubepi.providers.base import (
     AssistantMessage,
     Content,
-    Message,
-    Model,
     StreamEvent,
-    TextContent,
-    ThinkingLevel,
     ToolCall,
     ToolDefinition,
     ToolResultMessage,
@@ -157,10 +153,16 @@ class ToolExecutionEndEvent(BaseModel):
 
 
 AgentEvent = (
-    AgentStartEvent | AgentEndEvent
-    | TurnStartEvent | TurnEndEvent
-    | MessageStartEvent | MessageUpdateEvent | MessageEndEvent
-    | ToolExecutionStartEvent | ToolExecutionUpdateEvent | ToolExecutionEndEvent
+    AgentStartEvent
+    | AgentEndEvent
+    | TurnStartEvent
+    | TurnEndEvent
+    | MessageStartEvent
+    | MessageUpdateEvent
+    | MessageEndEvent
+    | ToolExecutionStartEvent
+    | ToolExecutionUpdateEvent
+    | ToolExecutionEndEvent
 )
 
 AgentEventSink = Callable[[AgentEvent], Awaitable[None]]

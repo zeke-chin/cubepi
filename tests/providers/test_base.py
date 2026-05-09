@@ -1,9 +1,7 @@
 import asyncio
-from typing import Any
 
 from cubepi.providers.base import (
     AssistantMessage,
-    Content,
     ImageContent,
     MessageStream,
     Model,

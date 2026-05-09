@@ -7,7 +7,6 @@ from typing import Any
 
 from cubepi.providers.base import (
     AssistantMessage,
-    ImageContent,
     Message,
     MessageStream,
     Model,
@@ -23,7 +22,9 @@ from cubepi.providers.base import (
 
 
 class OpenAIProvider:
-    def __init__(self, *, api_key: str | None = None, base_url: str | None = None) -> None:
+    def __init__(
+        self, *, api_key: str | None = None, base_url: str | None = None
+    ) -> None:
         import openai
 
         kwargs: dict[str, Any] = {}
@@ -151,9 +152,9 @@ class OpenAIProvider:
                                     )
                                 )
                             if tc_delta.function and tc_delta.function.arguments:
-                                tool_calls_in_progress[idx][
-                                    "arguments"
-                                ] += tc_delta.function.arguments
+                                tool_calls_in_progress[idx]["arguments"] += (
+                                    tc_delta.function.arguments
+                                )
                                 ms.push(
                                     StreamEvent(
                                         type="toolcall_delta",

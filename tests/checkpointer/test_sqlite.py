@@ -43,7 +43,9 @@ class TestSQLiteCheckpointer:
 
     async def test_persistence_across_instances(self, db_path):
         async with SQLiteCheckpointer(db_path) as cp:
-            await cp.append("thread-1", [UserMessage(content=[TextContent(text="persist")])])
+            await cp.append(
+                "thread-1", [UserMessage(content=[TextContent(text="persist")])]
+            )
 
         async with SQLiteCheckpointer(db_path) as cp:
             data = await cp.load("thread-1")

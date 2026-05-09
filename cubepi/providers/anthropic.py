@@ -6,7 +6,6 @@ from typing import Any
 
 from cubepi.providers.base import (
     AssistantMessage,
-    Content,
     ImageContent,
     Message,
     MessageStream,
@@ -64,9 +63,7 @@ class AnthropicProvider:
                         content=[], usage=Usage(), timestamp=time.time()
                     )
                     ms.push(
-                        StreamEvent(
-                            type="start", partial=partial.model_copy(deep=True)
-                        )
+                        StreamEvent(type="start", partial=partial.model_copy(deep=True))
                     )
 
                     async for event in stream:
@@ -231,9 +228,7 @@ class AnthropicProvider:
                     )
                 )
             elif hasattr(delta, "thinking"):
-                if partial.content and isinstance(
-                    partial.content[-1], ThinkingContent
-                ):
+                if partial.content and isinstance(partial.content[-1], ThinkingContent):
                     partial.content[-1] = ThinkingContent(
                         thinking=partial.content[-1].thinking + delta.thinking
                     )
@@ -302,9 +297,7 @@ class AnthropicProvider:
             usage=Usage(
                 input_tokens=response.usage.input_tokens,
                 output_tokens=response.usage.output_tokens,
-                cache_read_tokens=getattr(
-                    response.usage, "cache_read_input_tokens", 0
-                )
+                cache_read_tokens=getattr(response.usage, "cache_read_input_tokens", 0)
                 or 0,
                 cache_write_tokens=getattr(
                     response.usage, "cache_creation_input_tokens", 0

@@ -1,7 +1,6 @@
 from cubepi.providers.openai import OpenAIProvider
 from cubepi.providers.base import (
     AssistantMessage,
-    Model,
     TextContent,
     ToolCall,
     ToolDefinition,

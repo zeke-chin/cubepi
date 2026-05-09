@@ -1,13 +1,12 @@
 import asyncio
 
-from cubepi.providers.base import (
-    AssistantMessage,
-    StreamEvent,
-    TextContent,
-    ThinkingContent,
-    ToolCall,
+from cubepi.providers.faux import (
+    FauxProvider,
+    faux_assistant_message,
+    faux_text,
+    faux_thinking,
+    faux_tool_call,
 )
-from cubepi.providers.faux import FauxProvider, faux_assistant_message, faux_text, faux_thinking, faux_tool_call
 
 
 class TestFauxHelpers:
@@ -40,7 +39,9 @@ class TestFauxHelpers:
         assert msg.stop_reason == "stop"
 
     def test_faux_assistant_message_blocks(self):
-        msg = faux_assistant_message([faux_text("hi"), faux_tool_call("search", {"q": "x"}, id="t1")])
+        msg = faux_assistant_message(
+            [faux_text("hi"), faux_tool_call("search", {"q": "x"}, id="t1")]
+        )
         assert len(msg.content) == 2
         assert msg.content[0].type == "text"
         assert msg.content[1].type == "tool_call"
@@ -56,6 +57,7 @@ class TestFauxHelpers:
 class TestFauxProvider:
     def _make_model(self):
         from cubepi.providers.base import Model
+
         return Model(id="faux-1", provider="faux")
 
     async def test_basic_text_response(self):
@@ -73,10 +75,12 @@ class TestFauxProvider:
 
     async def test_responses_consumed_in_order(self):
         provider = FauxProvider()
-        provider.set_responses([
-            faux_assistant_message("first"),
-            faux_assistant_message("second"),
-        ])
+        provider.set_responses(
+            [
+                faux_assistant_message("first"),
+                faux_assistant_message("second"),
+            ]
+        )
         model = self._make_model()
 
         stream1 = await provider.stream(model, [])
@@ -117,7 +121,6 @@ class TestFauxProvider:
         provider = FauxProvider()
         provider.set_responses([faux_assistant_message("first")])
         provider.append_responses([faux_assistant_message("second")])
-        model = self._make_model()
 
         assert provider.pending_response_count == 2
 
@@ -152,7 +155,9 @@ class TestFauxProvider:
 
     async def test_streams_thinking_deltas(self):
         provider = FauxProvider(token_size_min=1, token_size_max=1)
-        provider.set_responses([faux_assistant_message([faux_thinking("think"), faux_text("ok")])])
+        provider.set_responses(
+            [faux_assistant_message([faux_thinking("think"), faux_text("ok")])]
+        )
         model = self._make_model()
 
         stream = await provider.stream(model, [])
@@ -165,12 +170,14 @@ class TestFauxProvider:
 
     async def test_streams_tool_call_deltas(self):
         provider = FauxProvider(token_size_min=1, token_size_max=1)
-        provider.set_responses([
-            faux_assistant_message(
-                [faux_tool_call("search", {"q": "test"}, id="t1")],
-                stop_reason="tool_use",
-            ),
-        ])
+        provider.set_responses(
+            [
+                faux_assistant_message(
+                    [faux_tool_call("search", {"q": "test"}, id="t1")],
+                    stop_reason="tool_use",
+                ),
+            ]
+        )
         model = self._make_model()
 
         stream = await provider.stream(model, [])
@@ -189,16 +196,22 @@ class TestFauxProvider:
         signal.set()
 
         stream = await provider.stream(model, [], signal=signal)
-        events = [e async for e in stream]
+        _ = [e async for e in stream]
         result = await stream.result()
 
         assert result.stop_reason == "aborted"
 
     async def test_abort_mid_stream(self):
-        provider = FauxProvider(tokens_per_second=20, token_size_min=2, token_size_max=2)
-        provider.set_responses([
-            faux_assistant_message("one two three four five six seven eight nine ten"),
-        ])
+        provider = FauxProvider(
+            tokens_per_second=20, token_size_min=2, token_size_max=2
+        )
+        provider.set_responses(
+            [
+                faux_assistant_message(
+                    "one two three four five six seven eight nine ten"
+                ),
+            ]
+        )
         model = self._make_model()
         signal = asyncio.Event()
 
@@ -217,9 +230,13 @@ class TestFauxProvider:
 
     async def test_error_message_passthrough(self):
         provider = FauxProvider()
-        provider.set_responses([
-            faux_assistant_message("", stop_reason="error", error_message="API rate limit"),
-        ])
+        provider.set_responses(
+            [
+                faux_assistant_message(
+                    "", stop_reason="error", error_message="API rate limit"
+                ),
+            ]
+        )
         model = self._make_model()
 
         stream = await provider.stream(model, [])
@@ -231,27 +248,31 @@ class TestFauxProvider:
 
     async def test_multiple_tool_calls_in_one_message(self):
         provider = FauxProvider()
-        provider.set_responses([
-            faux_assistant_message(
-                [
-                    faux_tool_call("search", {"q": "a"}, id="t1"),
-                    faux_tool_call("search", {"q": "b"}, id="t2"),
-                ],
-                stop_reason="tool_use",
-            ),
-        ])
+        provider.set_responses(
+            [
+                faux_assistant_message(
+                    [
+                        faux_tool_call("search", {"q": "a"}, id="t1"),
+                        faux_tool_call("search", {"q": "b"}, id="t2"),
+                    ],
+                    stop_reason="tool_use",
+                ),
+            ]
+        )
         model = self._make_model()
 
         stream = await provider.stream(model, [])
         events = [e async for e in stream]
-        result = await stream.result()
+        await stream.result()
 
         toolcall_starts = [e for e in events if e.type == "toolcall_start"]
         assert len(toolcall_starts) == 2
 
     async def test_call_count_tracking(self):
         provider = FauxProvider()
-        provider.set_responses([faux_assistant_message("a"), faux_assistant_message("b")])
+        provider.set_responses(
+            [faux_assistant_message("a"), faux_assistant_message("b")]
+        )
         model = self._make_model()
 
         assert provider.call_count == 0

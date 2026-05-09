@@ -1,5 +1,3 @@
-from typing import Any
-
 from pydantic import BaseModel
 
 from cubepi.agent.types import (
@@ -8,14 +6,11 @@ from cubepi.agent.types import (
     AgentStartEvent,
     AgentTool,
     AgentToolResult,
-    BeforeToolCallContext,
     BeforeToolCallResult,
-    AfterToolCallContext,
     AfterToolCallResult,
     MessageEndEvent,
     MessageStartEvent,
     MessageUpdateEvent,
-    ShouldStopAfterTurnContext,
     ToolExecutionEndEvent,
     ToolExecutionStartEvent,
     ToolExecutionUpdateEvent,
@@ -26,8 +21,6 @@ from cubepi.providers.base import (
     AssistantMessage,
     StreamEvent,
     TextContent,
-    ToolCall,
-    ToolResultMessage,
     UserMessage,
 )
 
@@ -69,17 +62,22 @@ class TestAgentEvents:
         assert e.type == "message_end"
 
     def test_tool_execution_events(self):
-        start = ToolExecutionStartEvent(tool_call_id="t1", tool_name="search", args={"q": "test"})
+        start = ToolExecutionStartEvent(
+            tool_call_id="t1", tool_name="search", args={"q": "test"}
+        )
         assert start.type == "tool_execution_start"
 
         update = ToolExecutionUpdateEvent(
-            tool_call_id="t1", tool_name="search", args={"q": "test"},
+            tool_call_id="t1",
+            tool_name="search",
+            args={"q": "test"},
             partial_result=AgentToolResult(content=[TextContent(text="partial")]),
         )
         assert update.type == "tool_execution_update"
 
         end = ToolExecutionEndEvent(
-            tool_call_id="t1", tool_name="search",
+            tool_call_id="t1",
+            tool_name="search",
             result=AgentToolResult(content=[TextContent(text="done")]),
             is_error=False,
         )

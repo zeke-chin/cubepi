@@ -1,4 +1,3 @@
-import asyncio
 from typing import Any
 
 from pydantic import BaseModel
@@ -11,18 +10,12 @@ from cubepi.agent.types import (
     AgentToolResult,
 )
 from cubepi.providers.base import (
-    AssistantMessage,
     Message,
-    MessageStream,
     Model,
-    StreamEvent,
     TextContent,
-    ToolCall,
-    ToolResultMessage,
     UserMessage,
-    Usage,
 )
-from cubepi.providers.faux import FauxProvider, faux_assistant_message, faux_text, faux_tool_call
+from cubepi.providers.faux import FauxProvider, faux_assistant_message, faux_tool_call
 
 
 def make_model() -> Model:
@@ -34,7 +27,11 @@ def make_user_message(text: str) -> UserMessage:
 
 
 def identity_converter(messages: list[Any]) -> list[Message]:
-    return [m for m in messages if hasattr(m, "role") and m.role in ("user", "assistant", "tool_result")]
+    return [
+        m
+        for m in messages
+        if hasattr(m, "role") and m.role in ("user", "assistant", "tool_result")
+    ]
 
 
 class EchoParams(BaseModel):
@@ -98,7 +95,11 @@ class TestAgentLoop:
         converted: list[Message] = []
 
         def converter(messages):
-            result = [m for m in messages if hasattr(m, "role") and m.role in ("user", "assistant", "tool_result")]
+            result = [
+                m
+                for m in messages
+                if hasattr(m, "role") and m.role in ("user", "assistant", "tool_result")
+            ]
             converted.extend(result)
             return result
 
@@ -159,17 +160,21 @@ class TestAgentLoop:
 
         async def echo_execute(tool_call_id, params, *, signal=None, on_update=None):
             executed.append(params.value)
-            return AgentToolResult(content=[TextContent(text=f"echoed: {params.value}")])
+            return AgentToolResult(
+                content=[TextContent(text=f"echoed: {params.value}")]
+            )
 
         tool = make_echo_tool(execute_fn=echo_execute)
         provider = FauxProvider()
-        provider.set_responses([
-            faux_assistant_message(
-                [faux_tool_call("echo", {"value": "hello"}, id="tool-1")],
-                stop_reason="tool_use",
-            ),
-            faux_assistant_message("done"),
-        ])
+        provider.set_responses(
+            [
+                faux_assistant_message(
+                    [faux_tool_call("echo", {"value": "hello"}, id="tool-1")],
+                    stop_reason="tool_use",
+                ),
+                faux_assistant_message("done"),
+            ]
+        )
 
         context = AgentContext(system_prompt="", messages=[], tools=[tool])
         events: list[AgentEvent] = []
@@ -191,13 +196,15 @@ class TestAgentLoop:
     async def test_should_stop_after_turn(self):
         tool = make_echo_tool()
         provider = FauxProvider()
-        provider.set_responses([
-            faux_assistant_message(
-                [faux_tool_call("echo", {"value": "hello"}, id="tool-1")],
-                stop_reason="tool_use",
-            ),
-            faux_assistant_message("should not run"),
-        ])
+        provider.set_responses(
+            [
+                faux_assistant_message(
+                    [faux_tool_call("echo", {"value": "hello"}, id="tool-1")],
+                    stop_reason="tool_use",
+                ),
+                faux_assistant_message("should not run"),
+            ]
+        )
 
         context = AgentContext(system_prompt="", messages=[], tools=[tool])
         stop_called = []
@@ -231,16 +238,18 @@ class TestAgentLoop:
 
         tool = make_echo_tool(execute_fn=echo_execute)
         provider = FauxProvider()
-        provider.set_responses([
-            faux_assistant_message(
-                [
-                    faux_tool_call("echo", {"value": "first"}, id="tool-1"),
-                    faux_tool_call("echo", {"value": "second"}, id="tool-2"),
-                ],
-                stop_reason="tool_use",
-            ),
-            faux_assistant_message("done"),
-        ])
+        provider.set_responses(
+            [
+                faux_assistant_message(
+                    [
+                        faux_tool_call("echo", {"value": "first"}, id="tool-1"),
+                        faux_tool_call("echo", {"value": "second"}, id="tool-2"),
+                    ],
+                    stop_reason="tool_use",
+                ),
+                faux_assistant_message("done"),
+            ]
+        )
 
         context = AgentContext(system_prompt="", messages=[], tools=[tool])
         steering_delivered = False
@@ -272,12 +281,14 @@ class TestAgentLoop:
 
         tool = make_echo_tool(execute_fn=term_execute)
         provider = FauxProvider()
-        provider.set_responses([
-            faux_assistant_message(
-                [faux_tool_call("echo", {"value": "hello"}, id="tool-1")],
-                stop_reason="tool_use",
-            ),
-        ])
+        provider.set_responses(
+            [
+                faux_assistant_message(
+                    [faux_tool_call("echo", {"value": "hello"}, id="tool-1")],
+                    stop_reason="tool_use",
+                ),
+            ]
+        )
 
         context = AgentContext(system_prompt="", messages=[], tools=[tool])
         messages = await run_agent_loop(
@@ -295,9 +306,13 @@ class TestAgentLoop:
 
     async def test_error_stop_reason_ends_loop(self):
         provider = FauxProvider()
-        provider.set_responses([
-            faux_assistant_message("", stop_reason="error", error_message="API error"),
-        ])
+        provider.set_responses(
+            [
+                faux_assistant_message(
+                    "", stop_reason="error", error_message="API error"
+                ),
+            ]
+        )
 
         context = AgentContext(system_prompt="", messages=[], tools=[])
         events: list[AgentEvent] = []

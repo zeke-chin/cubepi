@@ -1,8 +1,5 @@
-import pytest
-
 from cubepi.providers.anthropic import AnthropicProvider
 from cubepi.providers.base import (
-    Model,
     TextContent,
     ToolCall,
     ToolDefinition,

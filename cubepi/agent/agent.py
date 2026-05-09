@@ -3,20 +3,16 @@ from __future__ import annotations
 import asyncio
 import time
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable, Generic, TypeVar
+from typing import Any, Callable, Generic, TypeVar
 
 from cubepi.agent.loop import run_agent_loop, run_agent_loop_continue
 from cubepi.agent.types import (
     AgentContext,
     AgentEndEvent,
     AgentEvent,
-    AgentStartEvent,
     AgentTool,
     MessageEndEvent,
     MessageStartEvent,
-    MessageUpdateEvent,
-    ToolExecutionEndEvent,
-    ToolExecutionStartEvent,
     TurnEndEvent,
 )
 from cubepi.providers.base import (
@@ -191,9 +187,7 @@ class Agent(Generic[TMessage]):
 
         if isinstance(message, str):
             messages = [
-                UserMessage(
-                    content=[TextContent(text=message)], timestamp=time.time()
-                )
+                UserMessage(content=[TextContent(text=message)], timestamp=time.time())
             ]
         elif isinstance(message, list):
             messages = message
@@ -312,18 +306,12 @@ class Agent(Generic[TMessage]):
             usage=Usage(),
             timestamp=time.time(),
         )
-        await self._process_event(
-            MessageStartEvent(message=failure_message)
-        )
-        await self._process_event(
-            MessageEndEvent(message=failure_message)
-        )
+        await self._process_event(MessageStartEvent(message=failure_message))
+        await self._process_event(MessageEndEvent(message=failure_message))
         await self._process_event(
             TurnEndEvent(message=failure_message, tool_results=[])
         )
-        await self._process_event(
-            AgentEndEvent(messages=[failure_message])
-        )
+        await self._process_event(AgentEndEvent(messages=[failure_message]))
 
     async def _process_event(self, event: AgentEvent) -> None:
         if event.type == "message_start":

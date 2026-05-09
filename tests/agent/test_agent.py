@@ -1,9 +1,8 @@
 import asyncio
 
 from cubepi.agent.agent import Agent
-from cubepi.agent.types import AgentEvent, AgentTool, AgentToolResult
+from cubepi.agent.types import AgentTool
 from cubepi.providers.base import (
-    AssistantMessage,
     Model,
     TextContent,
     UserMessage,
@@ -87,10 +86,14 @@ class TestAgentSubscribe:
         await agent.prompt("hello")
 
         assert events == [
-            "agent_start", "turn_start",
-            "message_start", "message_end",
-            "message_start", "message_end",
-            "turn_end", "agent_end",
+            "agent_start",
+            "turn_start",
+            "message_start",
+            "message_end",
+            "message_start",
+            "message_end",
+            "turn_end",
+            "agent_end",
         ]
         last_msg = agent.state.messages[-1]
         assert last_msg.role == "assistant"
@@ -141,7 +144,16 @@ class TestAgentState:
         provider = FauxProvider()
         agent = Agent(provider=provider, model=make_model())
 
-        tools = [AgentTool(name="t", description="t", parameters=type("P", (object,), {"model_json_schema": classmethod(lambda cls: {})}), execute=lambda *a, **k: None)]
+        tools = [
+            AgentTool(
+                name="t",
+                description="t",
+                parameters=type(
+                    "P", (object,), {"model_json_schema": classmethod(lambda cls: {})}
+                ),
+                execute=lambda *a, **k: None,
+            )
+        ]
         agent.state.tools = tools
         assert agent.state.tools is not tools
 
@@ -186,6 +198,7 @@ class TestAgentPromptGuards:
 
         async def slow_stream(*args, **kwargs):
             from cubepi.providers.base import MessageStream, StreamEvent
+
             ms = MessageStream()
 
             async def produce():
@@ -219,6 +232,7 @@ class TestAgentPromptGuards:
 
         async def slow_stream(*args, **kwargs):
             from cubepi.providers.base import MessageStream, StreamEvent
+
             ms = MessageStream()
 
             async def produce():
@@ -249,10 +263,12 @@ class TestAgentPromptGuards:
 class TestAgentResume:
     async def test_resume_processes_follow_up_messages(self):
         provider = FauxProvider()
-        provider.set_responses([
-            faux_assistant_message("Initial response"),
-            faux_assistant_message("Processed"),
-        ])
+        provider.set_responses(
+            [
+                faux_assistant_message("Initial response"),
+                faux_assistant_message("Processed"),
+            ]
+        )
         agent = Agent(provider=provider, model=make_model())
 
         await agent.prompt("Initial")
@@ -260,7 +276,9 @@ class TestAgentResume:
         await agent.resume()
 
         has_follow_up = any(
-            hasattr(m, "content") and hasattr(m, "role") and m.role == "user"
+            hasattr(m, "content")
+            and hasattr(m, "role")
+            and m.role == "user"
             and any(
                 hasattr(c, "text") and c.text == "follow-up"
                 for c in (m.content if isinstance(m.content, list) else [])

@@ -136,7 +136,9 @@ class FauxProvider:
                         usage=Usage(),
                         timestamp=time.time(),
                     )
-                    ms.push(StreamEvent(type="error", error_message=error_msg.error_message))
+                    ms.push(
+                        StreamEvent(type="error", error_message=error_msg.error_message)
+                    )
                     ms.set_result(error_msg)
                     return
 
@@ -191,60 +193,118 @@ class FauxProvider:
         for block in message.content:
             if signal and signal.is_set():
                 aborted = self._make_aborted(partial)
-                stream.push(StreamEvent(type="error", error_message="Request was aborted"))
+                stream.push(
+                    StreamEvent(type="error", error_message="Request was aborted")
+                )
                 stream.set_result(aborted)
                 return
 
             if isinstance(block, ThinkingContent):
                 partial.content.append(ThinkingContent(thinking=""))
-                stream.push(StreamEvent(type="thinking_start", partial=partial.model_copy(deep=True)))
+                stream.push(
+                    StreamEvent(
+                        type="thinking_start", partial=partial.model_copy(deep=True)
+                    )
+                )
                 for chunk in _split_by_token_size(block.thinking, self._min, self._max):
                     await self._schedule_chunk(chunk)
                     if signal and signal.is_set():
                         aborted = self._make_aborted(partial)
-                        stream.push(StreamEvent(type="error", error_message="Request was aborted"))
+                        stream.push(
+                            StreamEvent(
+                                type="error", error_message="Request was aborted"
+                            )
+                        )
                         stream.set_result(aborted)
                         return
                     last = partial.content[-1]
                     if isinstance(last, ThinkingContent):
-                        partial.content[-1] = ThinkingContent(thinking=last.thinking + chunk)
+                        partial.content[-1] = ThinkingContent(
+                            thinking=last.thinking + chunk
+                        )
                     stream.push(
-                        StreamEvent(type="thinking_delta", delta=chunk, partial=partial.model_copy(deep=True))
+                        StreamEvent(
+                            type="thinking_delta",
+                            delta=chunk,
+                            partial=partial.model_copy(deep=True),
+                        )
                     )
-                stream.push(StreamEvent(type="thinking_end", partial=partial.model_copy(deep=True)))
+                stream.push(
+                    StreamEvent(
+                        type="thinking_end", partial=partial.model_copy(deep=True)
+                    )
+                )
 
             elif isinstance(block, TextContent):
                 partial.content.append(TextContent(text=""))
-                stream.push(StreamEvent(type="text_start", partial=partial.model_copy(deep=True)))
+                stream.push(
+                    StreamEvent(
+                        type="text_start", partial=partial.model_copy(deep=True)
+                    )
+                )
                 for chunk in _split_by_token_size(block.text, self._min, self._max):
                     await self._schedule_chunk(chunk)
                     if signal and signal.is_set():
                         aborted = self._make_aborted(partial)
-                        stream.push(StreamEvent(type="error", error_message="Request was aborted"))
+                        stream.push(
+                            StreamEvent(
+                                type="error", error_message="Request was aborted"
+                            )
+                        )
                         stream.set_result(aborted)
                         return
                     last = partial.content[-1]
                     if isinstance(last, TextContent):
                         partial.content[-1] = TextContent(text=last.text + chunk)
-                    stream.push(StreamEvent(type="text_delta", delta=chunk, partial=partial.model_copy(deep=True)))
-                stream.push(StreamEvent(type="text_end", partial=partial.model_copy(deep=True)))
+                    stream.push(
+                        StreamEvent(
+                            type="text_delta",
+                            delta=chunk,
+                            partial=partial.model_copy(deep=True),
+                        )
+                    )
+                stream.push(
+                    StreamEvent(type="text_end", partial=partial.model_copy(deep=True))
+                )
 
             elif isinstance(block, ToolCall):
-                partial.content.append(ToolCall(id=block.id, name=block.name, arguments={}))
-                stream.push(StreamEvent(type="toolcall_start", partial=partial.model_copy(deep=True)))
+                partial.content.append(
+                    ToolCall(id=block.id, name=block.name, arguments={})
+                )
+                stream.push(
+                    StreamEvent(
+                        type="toolcall_start", partial=partial.model_copy(deep=True)
+                    )
+                )
                 json_str = json.dumps(block.arguments)
                 for chunk in _split_by_token_size(json_str, self._min, self._max):
                     await self._schedule_chunk(chunk)
                     if signal and signal.is_set():
                         aborted = self._make_aborted(partial)
-                        stream.push(StreamEvent(type="error", error_message="Request was aborted"))
+                        stream.push(
+                            StreamEvent(
+                                type="error", error_message="Request was aborted"
+                            )
+                        )
                         stream.set_result(aborted)
                         return
-                    stream.push(StreamEvent(type="toolcall_delta", delta=chunk, partial=partial.model_copy(deep=True)))
+                    stream.push(
+                        StreamEvent(
+                            type="toolcall_delta",
+                            delta=chunk,
+                            partial=partial.model_copy(deep=True),
+                        )
+                    )
                 last = partial.content[-1]
                 if isinstance(last, ToolCall):
-                    partial.content[-1] = ToolCall(id=block.id, name=block.name, arguments=block.arguments)
-                stream.push(StreamEvent(type="toolcall_end", partial=partial.model_copy(deep=True)))
+                    partial.content[-1] = ToolCall(
+                        id=block.id, name=block.name, arguments=block.arguments
+                    )
+                stream.push(
+                    StreamEvent(
+                        type="toolcall_end", partial=partial.model_copy(deep=True)
+                    )
+                )
 
         if message.stop_reason in ("error", "aborted"):
             stream.push(StreamEvent(type="error", error_message=message.error_message))

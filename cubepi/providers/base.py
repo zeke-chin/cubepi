@@ -94,10 +94,17 @@ class ToolDefinition(BaseModel):
 class StreamEvent(BaseModel):
     type: Literal[
         "start",
-        "text_start", "text_delta", "text_end",
-        "thinking_start", "thinking_delta", "thinking_end",
-        "toolcall_start", "toolcall_delta", "toolcall_end",
-        "done", "error",
+        "text_start",
+        "text_delta",
+        "text_end",
+        "thinking_start",
+        "thinking_delta",
+        "thinking_end",
+        "toolcall_start",
+        "toolcall_delta",
+        "toolcall_end",
+        "done",
+        "error",
     ]
     delta: str | None = None
     partial: AssistantMessage | None = None
