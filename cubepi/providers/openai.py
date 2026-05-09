@@ -1,0 +1,279 @@
+from __future__ import annotations
+
+import asyncio
+import json
+import time
+from typing import Any
+
+from cubepi.providers.base import (
+    AssistantMessage,
+    ImageContent,
+    Message,
+    MessageStream,
+    Model,
+    StreamEvent,
+    TextContent,
+    ThinkingLevel,
+    ToolCall,
+    ToolDefinition,
+    ToolResultMessage,
+    Usage,
+    UserMessage,
+)
+
+
+class OpenAIProvider:
+    def __init__(self, *, api_key: str | None = None, base_url: str | None = None) -> None:
+        import openai
+
+        kwargs: dict[str, Any] = {}
+        if api_key:
+            kwargs["api_key"] = api_key
+        if base_url:
+            kwargs["base_url"] = base_url
+        self._client = openai.AsyncOpenAI(**kwargs)
+
+    async def stream(
+        self,
+        model: Model,
+        messages: list[Message],
+        *,
+        system_prompt: str = "",
+        tools: list[ToolDefinition] | None = None,
+        thinking: ThinkingLevel = "off",
+        signal: asyncio.Event | None = None,
+    ) -> MessageStream:
+        ms = MessageStream()
+
+        api_messages: list[dict[str, Any]] = []
+        if system_prompt:
+            api_messages.append({"role": "system", "content": system_prompt})
+        api_messages.extend(self._convert_message(m) for m in messages)
+
+        kwargs: dict[str, Any] = {
+            "model": model.id,
+            "messages": api_messages,
+            "stream": True,
+        }
+        if tools:
+            kwargs["tools"] = [self._convert_tool(t) for t in tools]
+
+        async def _produce() -> None:
+            try:
+                response = await self._client.chat.completions.create(**kwargs)
+                partial = AssistantMessage(
+                    content=[], usage=Usage(), timestamp=time.time()
+                )
+                ms.push(
+                    StreamEvent(type="start", partial=partial.model_copy(deep=True))
+                )
+
+                current_text = ""
+                tool_calls_in_progress: dict[int, dict[str, Any]] = {}
+                text_started = False
+
+                async for chunk in response:
+                    if signal and signal.is_set():
+                        aborted = partial.model_copy(
+                            update={
+                                "stop_reason": "aborted",
+                                "error_message": "Request was aborted",
+                            }
+                        )
+                        ms.push(
+                            StreamEvent(
+                                type="error",
+                                error_message="Request was aborted",
+                            )
+                        )
+                        ms.set_result(aborted)
+                        return
+
+                    delta = chunk.choices[0].delta if chunk.choices else None
+                    if not delta:
+                        continue
+
+                    if delta.content:
+                        if not text_started:
+                            partial.content.append(TextContent(text=""))
+                            ms.push(
+                                StreamEvent(
+                                    type="text_start",
+                                    partial=partial.model_copy(deep=True),
+                                )
+                            )
+                            text_started = True
+                        current_text += delta.content
+                        if partial.content and isinstance(
+                            partial.content[-1], TextContent
+                        ):
+                            partial.content[-1] = TextContent(text=current_text)
+                        ms.push(
+                            StreamEvent(
+                                type="text_delta",
+                                delta=delta.content,
+                                partial=partial.model_copy(deep=True),
+                            )
+                        )
+
+                    if delta.tool_calls:
+                        for tc_delta in delta.tool_calls:
+                            idx = tc_delta.index
+                            if idx not in tool_calls_in_progress:
+                                if text_started:
+                                    ms.push(
+                                        StreamEvent(
+                                            type="text_end",
+                                            partial=partial.model_copy(deep=True),
+                                        )
+                                    )
+                                    text_started = False
+                                tool_calls_in_progress[idx] = {
+                                    "id": tc_delta.id or "",
+                                    "name": (
+                                        tc_delta.function.name
+                                        if tc_delta.function
+                                        else ""
+                                    ),
+                                    "arguments": "",
+                                }
+                                partial.content.append(
+                                    ToolCall(
+                                        id=tool_calls_in_progress[idx]["id"],
+                                        name=tool_calls_in_progress[idx]["name"],
+                                        arguments={},
+                                    )
+                                )
+                                ms.push(
+                                    StreamEvent(
+                                        type="toolcall_start",
+                                        partial=partial.model_copy(deep=True),
+                                    )
+                                )
+                            if tc_delta.function and tc_delta.function.arguments:
+                                tool_calls_in_progress[idx][
+                                    "arguments"
+                                ] += tc_delta.function.arguments
+                                ms.push(
+                                    StreamEvent(
+                                        type="toolcall_delta",
+                                        delta=tc_delta.function.arguments,
+                                        partial=partial.model_copy(deep=True),
+                                    )
+                                )
+
+                    finish_reason = (
+                        chunk.choices[0].finish_reason if chunk.choices else None
+                    )
+                    if finish_reason:
+                        if text_started:
+                            ms.push(
+                                StreamEvent(
+                                    type="text_end",
+                                    partial=partial.model_copy(deep=True),
+                                )
+                            )
+
+                        for idx, tc_data in tool_calls_in_progress.items():
+                            try:
+                                args = (
+                                    json.loads(tc_data["arguments"])
+                                    if tc_data["arguments"]
+                                    else {}
+                                )
+                            except json.JSONDecodeError:
+                                args = {}
+                            for i, c in enumerate(partial.content):
+                                if isinstance(c, ToolCall) and c.id == tc_data["id"]:
+                                    partial.content[i] = ToolCall(
+                                        id=tc_data["id"],
+                                        name=tc_data["name"],
+                                        arguments=args,
+                                    )
+                            ms.push(
+                                StreamEvent(
+                                    type="toolcall_end",
+                                    partial=partial.model_copy(deep=True),
+                                )
+                            )
+
+                        stop_map = {
+                            "stop": "stop",
+                            "tool_calls": "tool_use",
+                            "length": "length",
+                        }
+                        final = partial.model_copy(
+                            update={
+                                "stop_reason": stop_map.get(
+                                    finish_reason, finish_reason
+                                ),
+                            }
+                        )
+                        ms.push(StreamEvent(type="done"))
+                        ms.set_result(final)
+                        return
+
+                ms.push(StreamEvent(type="done"))
+                ms.set_result(partial)
+
+            except Exception as exc:
+                error_msg = AssistantMessage(
+                    content=[],
+                    stop_reason="error",
+                    error_message=str(exc),
+                    usage=Usage(),
+                    timestamp=time.time(),
+                )
+                ms.push(StreamEvent(type="error", error_message=str(exc)))
+                ms.set_result(error_msg)
+
+        asyncio.create_task(_produce())
+        return ms
+
+    @staticmethod
+    def _convert_message(msg: Message) -> dict[str, Any]:
+        if isinstance(msg, UserMessage):
+            text_parts = [c.text for c in msg.content if isinstance(c, TextContent)]
+            return {"role": "user", "content": "\n".join(text_parts)}
+
+        elif isinstance(msg, AssistantMessage):
+            text_parts = [c.text for c in msg.content if isinstance(c, TextContent)]
+            tool_calls = [c for c in msg.content if isinstance(c, ToolCall)]
+
+            result: dict[str, Any] = {"role": "assistant"}
+            if text_parts:
+                result["content"] = "\n".join(text_parts)
+            if tool_calls:
+                result["tool_calls"] = [
+                    {
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {
+                            "name": tc.name,
+                            "arguments": json.dumps(tc.arguments),
+                        },
+                    }
+                    for tc in tool_calls
+                ]
+            return result
+
+        elif isinstance(msg, ToolResultMessage):
+            text_parts = [c.text for c in msg.content if isinstance(c, TextContent)]
+            return {
+                "role": "tool",
+                "tool_call_id": msg.tool_call_id,
+                "content": "\n".join(text_parts),
+            }
+
+        return {"role": "user", "content": ""}
+
+    @staticmethod
+    def _convert_tool(td: ToolDefinition) -> dict[str, Any]:
+        return {
+            "type": "function",
+            "function": {
+                "name": td.name,
+                "description": td.description,
+                "parameters": td.parameters,
+            },
+        }
