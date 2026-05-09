@@ -55,7 +55,7 @@ def adjust_max_tokens_for_thinking(
 
     max_tokens = min(base_max_tokens + thinking_budget, model_max_tokens)
 
-    if max_tokens <= thinking_budget:
+    if max_tokens - thinking_budget < min_output_tokens:
         thinking_budget = max(0, max_tokens - min_output_tokens)
 
     return max_tokens, thinking_budget

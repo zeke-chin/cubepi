@@ -139,7 +139,7 @@ def _close_partial_json(text: str) -> str:
                 continue
             if ch == '"':
                 in_string = False
-                if stack:
+                if stack and stack[-1] == '"':
                     stack.pop()
             i += 1
             continue
