@@ -14,6 +14,7 @@ from cubepi.providers.base import (
     Model,
     StreamEvent,
     TextContent,
+    ThinkingBudgets,
     ThinkingLevel,
     ToolCall,
     ToolDefinition,
@@ -44,6 +45,7 @@ class OpenAIProvider:
         system_prompt: str = "",
         tools: list[ToolDefinition] | None = None,
         thinking: ThinkingLevel = "off",
+        thinking_budgets: ThinkingBudgets | None = None,
         signal: asyncio.Event | None = None,
     ) -> MessageStream:
         ms = MessageStream()
