@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Callable
+from typing import Callable
 
 from cubepi.agent.tools import execute_tool_calls
 from cubepi.agent.types import (
