@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import inspect
 from dataclasses import dataclass, field
 from typing import (
@@ -213,7 +214,36 @@ class MessageStream:
         return item
 
     async def result(self) -> AssistantMessage:
-        return await self._result_future
+        """Return the final assistant message.
+
+        Blocks not just on the result future, but also on the producer
+        task's completion — the producer's ``finally`` block runs
+        :func:`_fire_response_listeners` (after ``set_result``), so
+        without waiting for the task, callers under ``asyncio.run``
+        teardown could exit before async response listeners have run.
+        Producer exceptions are NOT re-raised here; they were already
+        surfaced via the result future or the stream's error events.
+        """
+        msg = await self._result_future
+        task = self._producer_task
+        # Don't await ourselves — providers may call result() from inside
+        # the producer task (e.g. to read an aborted result set by an
+        # internal helper); that path would deadlock.
+        if task is not None and not task.done() and task is not asyncio.current_task():
+            # ``asyncio.shield`` lets the producer's finally (response
+            # listener cleanup) keep running independently if our caller
+            # is cancelled while we're waiting. We re-raise the caller's
+            # CancelledError so cooperative shutdown/timeouts still
+            # propagate; the producer continues unaffected.
+            try:
+                await asyncio.shield(task)
+            except asyncio.CancelledError:
+                raise
+            except BaseException:
+                # Producer raised — caller already has the result via the
+                # future. Swallow so result() returns the message.
+                pass
+        return msg
 
 
 @dataclass
@@ -230,6 +260,239 @@ Return a dict to replace the payload, or None to keep unchanged."""
 
 OnResponseCallback = Callable[["ProviderResponse", Model], Awaitable[None] | None]
 """Optional callback invoked after an HTTP response is received."""
+
+
+OnRequestCallback = Callable[[dict, Model], Awaitable[None] | None]
+"""Persistent observer. Fires just before HTTP send, after any per-call
+``StreamOptions.on_payload`` mutation has been applied. Receives the final
+wire payload dict and the Model. Return value is ignored."""
+
+OnChunkCallback = Callable[["StreamEvent", Model], Awaitable[None] | None]
+"""Persistent observer. Fires for every StreamEvent pushed onto the stream
+(start, text_delta, thinking_delta, toolcall_delta, done, error, ...).
+Heavy listeners should early-return on irrelevant event types — this hook
+fires hot. Return value is ignored."""
+
+OnResponseBodyCallback = Callable[
+    [dict | None, Model, BaseException | None], Awaitable[None] | None
+]
+"""Persistent observer. Fires exactly once per ``stream()`` call, in a
+finally block, after the stream terminates.
+
+- body: assembled provider response as a dict (same shape a non-streaming
+  call to the provider would have returned), or None if the stream failed
+  before a response could be assembled.
+- exc: the exception that ended the stream (including
+  ``asyncio.CancelledError``), or None on normal completion.
+Return value is ignored."""
+
+
+async def _fire_listeners(listeners: list[Callable], *args: Any) -> None:
+    """Invoke each listener with ``*args``. Listener return values and
+    exceptions are ignored — a buggy listener must never crash the stream.
+
+    Iterates a snapshot (``tuple(listeners)``) so a listener that detaches
+    itself mid-iteration does not silently skip subsequent listeners.
+    Callers are responsible for the hot-path guard
+    (``if self._chunk_listeners:`` before ``await``) — see ``_emit`` helpers
+    in each provider."""
+    if not listeners:
+        return
+    for cb in tuple(listeners):
+        try:
+            result = cb(*args)
+            if inspect.isawaitable(result):
+                await result
+        except Exception as exc:  # noqa: BLE001 — intentional broad catch
+            _log_listener_exception(cb, exc)
+
+
+def _fire_listeners_sync(listeners: list[Callable], *args: Any) -> None:
+    """Synchronous variant of :func:`_fire_listeners`. Used in producer
+    ``finally`` blocks where awaiting another coroutine after a
+    cancellation is unreliable — the outer task is already cancelling, so
+    a subsequent ``await`` may not get a chance to run its callee's body.
+
+    Sync listeners are invoked directly. Async listeners are scheduled as
+    detached tasks wrapped in :func:`_safe_run_coroutine` so that any
+    exception raised inside the coroutine body is logged via
+    :func:`_log_listener_exception` rather than bubbling up to asyncio as
+    an "unhandled task exception" warning."""
+    if not listeners:
+        return
+    for cb in tuple(listeners):
+        try:
+            result = cb(*args)
+            if inspect.isawaitable(result):
+                wrapped = _safe_run_coroutine(cb, result)
+                try:
+                    asyncio.create_task(wrapped)
+                except RuntimeError:
+                    # No running event loop (e.g. teardown) — close both
+                    # the wrapper and the inner listener coroutine so
+                    # neither leaks as a "coroutine was never awaited"
+                    # warning.
+                    wrapped.close()
+                    close = getattr(result, "close", None)
+                    if callable(close):
+                        close()
+        except Exception as exc:  # noqa: BLE001 — intentional broad catch
+            _log_listener_exception(cb, exc)
+
+
+async def _fire_chunk_listeners(
+    listeners: list[Callable], event: "StreamEvent", model: "Model"
+) -> None:
+    """Fire :func:`subscribe_chunk` listeners with **per-listener** deep
+    copies of the event.
+
+    The consumer's queued ``StreamEvent`` (already pushed onto the
+    ``MessageStream``) and every other listener's copy are isolated.
+    Without per-listener copies, a redacting listener that mutated
+    ``event.partial`` would silently alter what later chunk listeners
+    observed in the same stream.
+    """
+    if not listeners:
+        return
+    for cb in tuple(listeners):
+        try:
+            result = cb(event.model_copy(deep=True), model)
+            if inspect.isawaitable(result):
+                await result
+        except Exception as exc:  # noqa: BLE001 — intentional broad catch
+            _log_listener_exception(cb, exc)
+
+
+async def _fire_request_listeners(
+    listeners: list[Callable], payload: dict, model: "Model"
+) -> None:
+    """Fire :func:`subscribe_request` listeners with **per-listener** deep
+    copies of the payload.
+
+    ``subscribe_request`` is documented as an **observer** — the
+    mutation hook is the per-call ``StreamOptions.on_payload`` slot,
+    which runs before this. Two isolation properties matter here:
+
+    1. The dict the provider is about to send over the wire (the
+       caller's ``kwargs``) must not be mutated by any listener.
+    2. Multi-subscriber observability must be order-independent — one
+       listener redacting fields in place must not affect what later
+       listeners observe.
+
+    Both are achieved by giving each listener its own ``deepcopy``.
+    Cost: at most one deepcopy per registered listener per stream call,
+    which is negligible compared to the HTTP call itself.
+    """
+    if not listeners:
+        return
+    for cb in tuple(listeners):
+        try:
+            snapshot = copy.deepcopy(payload)
+            result = cb(snapshot, model)
+            if inspect.isawaitable(result):
+                await result
+        except Exception as exc:  # noqa: BLE001 — intentional broad catch
+            _log_listener_exception(cb, exc)
+
+
+async def _fire_response_listeners(
+    listeners: list[Callable],
+    body: dict | None,
+    model: "Model",
+    exc: BaseException | None,
+) -> None:
+    """Fire response listeners with the right strategy for each
+    termination path.
+
+    Normal completion (``exc is None``) or an in-stream exception that is
+    NOT a cancel: ``await`` each async listener inline so the producer
+    task doesn't end before the listener has run — important because
+    callers that use ``asyncio.run(main())`` will tear down the loop the
+    moment ``main()`` returns, cancelling any still-detached listener
+    task.
+
+    Producer task cancellation (``exc`` is :class:`asyncio.CancelledError`):
+    fall back to :func:`_fire_listeners_sync`. Awaiting inside a finally
+    block of a cancelled task is unreliable — the runtime may skip past
+    the await without running the callee — so synchronous listeners run
+    inline and async listeners are scheduled as detached best-effort
+    tasks. This is the same contract the cancellation tests pin.
+
+    In both paths, each listener receives its own ``deepcopy`` of
+    ``body`` so multi-subscriber observability is order-independent.
+    """
+    if not listeners:
+        return
+    if isinstance(exc, asyncio.CancelledError):
+        _fire_listeners_sync_per_listener(listeners, body, model, exc)
+        return
+    for cb in tuple(listeners):
+        try:
+            snapshot = copy.deepcopy(body) if body is not None else None
+            result = cb(snapshot, model, exc)
+            if inspect.isawaitable(result):
+                await result
+        except Exception as listener_exc:  # noqa: BLE001
+            _log_listener_exception(cb, listener_exc)
+
+
+def _fire_listeners_sync_per_listener(
+    listeners: list[Callable],
+    body: dict | None,
+    model: "Model",
+    exc: BaseException | None,
+) -> None:
+    """Sync fanout for response listeners on the cancellation path,
+    giving each listener its own deep copy of ``body``."""
+    if not listeners:
+        return
+    for cb in tuple(listeners):
+        try:
+            snapshot = copy.deepcopy(body) if body is not None else None
+            result = cb(snapshot, model, exc)
+            if inspect.isawaitable(result):
+                wrapped = _safe_run_coroutine(cb, result)
+                try:
+                    asyncio.create_task(wrapped)
+                except RuntimeError:
+                    wrapped.close()
+                    close = getattr(result, "close", None)
+                    if callable(close):
+                        close()
+        except Exception as listener_exc:  # noqa: BLE001
+            _log_listener_exception(cb, listener_exc)
+
+
+async def _safe_run_coroutine(cb: Callable, coro: Any) -> None:
+    """Await an arbitrary coroutine, logging and swallowing any exception
+    it raises. Used by :func:`_fire_listeners_sync` so async listener
+    failures don't become asyncio unhandled-task-exception warnings."""
+    try:
+        await coro
+    except Exception as exc:  # noqa: BLE001 — intentional broad catch
+        _log_listener_exception(cb, exc)
+
+
+def _log_listener_exception(cb: Callable, exc: BaseException) -> None:
+    try:
+        from loguru import logger
+
+        logger.opt(exception=exc).warning(
+            "cubepi provider listener {} raised; swallowed", cb
+        )
+    except ImportError:
+        import logging
+
+        logging.getLogger("cubepi.providers").warning(
+            "cubepi provider listener %r raised; swallowed", cb, exc_info=exc
+        )
+
+
+def _detach(listeners: list, cb: Callable) -> None:
+    try:
+        listeners.remove(cb)
+    except ValueError:
+        pass
 
 
 class StreamOptions(BaseModel):
@@ -282,3 +545,89 @@ class Provider(Protocol):
         tools: list[ToolDefinition] | None = None,
         options: StreamOptions | None = None,
     ) -> MessageStream: ...
+
+
+class BaseProvider:
+    """Concrete base class for built-in cubepi providers.
+
+    Built-in providers (Anthropic, OpenAI, OpenAI Responses, Faux) inherit
+    from this class to gain the persistent listener registry used by
+    ``cubepi.tracing`` and other observers. User-defined providers may also
+    inherit from ``BaseProvider`` to opt in, or remain duck-typed against
+    the ``Provider`` Protocol (which only requires ``stream()``).
+
+    Concrete subclasses must implement ``stream()`` and call
+    ``_fire_listeners`` at three points: after the request payload is
+    finalized, for each ``StreamEvent`` pushed onto the stream, and exactly
+    once in a ``finally`` block after the stream terminates.
+
+    Per-call mutators (``StreamOptions.on_payload``,
+    ``StreamOptions.on_response``) retain their existing single-slot
+    semantics and fire independently of the persistent listener registry
+    below.
+    """
+
+    def __init__(self) -> None:
+        self._request_listeners: list[OnRequestCallback] = []
+        self._chunk_listeners: list[OnChunkCallback] = []
+        self._response_listeners: list[OnResponseBodyCallback] = []
+
+    async def stream(
+        self,
+        model: Model,
+        messages: list[Message],
+        *,
+        system_prompt: str = "",
+        tools: list[ToolDefinition] | None = None,
+        options: StreamOptions | None = None,
+    ) -> MessageStream:
+        raise NotImplementedError
+
+    def subscribe_request(self, cb: OnRequestCallback) -> Callable[[], None]:
+        """Register a persistent observer for request payloads.
+
+        Returns a detach callable that removes this specific subscription.
+        """
+        self._request_listeners.append(cb)
+        return lambda: _detach(self._request_listeners, cb)
+
+    def subscribe_chunk(self, cb: OnChunkCallback) -> Callable[[], None]:
+        """Register a persistent observer for stream chunks.
+
+        Returns a detach callable.
+        """
+        self._chunk_listeners.append(cb)
+        return lambda: _detach(self._chunk_listeners, cb)
+
+    def subscribe_response(self, cb: OnResponseBodyCallback) -> Callable[[], None]:
+        """Register a persistent observer for assembled responses.
+
+        Returns a detach callable.
+        """
+        self._response_listeners.append(cb)
+        return lambda: _detach(self._response_listeners, cb)
+
+    async def _emit(
+        self,
+        ms: "MessageStream",
+        event: "StreamEvent",
+        model: Model | None,
+    ) -> None:
+        """Push an event to the message stream and fan out to chunk
+        listeners with an isolated deep copy.
+
+        The synchronous guard on ``self._chunk_listeners`` makes the
+        no-listener case zero-await — important because this fires on
+        every text delta. When listeners are present, each receives a
+        ``model_copy(deep=True)`` of the event so a redacting/mutating
+        observer cannot edit the same object that was already enqueued
+        for the ``async for`` consumer.
+
+        ``model`` may be ``None`` when invoked from internal helpers
+        that bypass ``stream()`` (e.g. ``FauxProvider._stream_with_deltas``
+        is exposed for direct calls in tests). In that case the listener
+        fan-out is skipped — the test isn't observing listeners anyway.
+        """
+        ms.push(event)
+        if model is not None and self._chunk_listeners:
+            await _fire_chunk_listeners(self._chunk_listeners, event, model)
