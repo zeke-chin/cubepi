@@ -7,6 +7,7 @@ from typing import Any, Awaitable, Callable, Literal
 from pydantic import BaseModel, Field, create_model
 
 from cubepi.agent.types import AgentTool, AgentToolResult
+from cubepi.mcp._tracing import mark_span_mcp_error, mcp_client_span
 from cubepi.providers.base import Content, ImageContent, TextContent
 
 
@@ -104,12 +105,21 @@ def make_mcp_agent_tool(
     description: str,
     input_schema: dict[str, Any],
     call_remote: Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]],
+    server_address: str | None = None,
+    server_port: int | None = None,
+    protocol_version: str | None = None,
+    session_id: str | None = None,
 ) -> AgentTool:
     """Build a cubepi.AgentTool wrapping an MCP tool call.
 
     call_remote is the transport-specific RPC: given (tool_name, args_dict),
     returns the MCP tools/call response dict normalized to:
         {"content": [{"type": "text", "text": ...}, ...], "isError": bool}
+
+    The optional ``server_address`` / ``server_port`` / ``protocol_version``
+    / ``session_id`` are recorded on the OTel CLIENT span around the
+    remote call when ``cubepi[tracing]`` is installed. Loaders pass
+    whichever values they have access to from the MCP handshake.
     """
     parameters_model = mcp_schema_to_pydantic_model(
         tool_name=name,
@@ -123,16 +133,33 @@ def make_mcp_agent_tool(
         signal=None,
         on_update=None,
     ) -> AgentToolResult:
-        # tool_call_id and on_update are unused by MCP semantics (MCP RPC is
-        # not incremental), but we accept them for signature compatibility
-        # with cubepi's agent loop.
-        del tool_call_id, on_update
+        # on_update is unused by MCP semantics (MCP RPC is not
+        # incremental). ``tool_call_id`` is forwarded as the parent
+        # lookup key so the CLIENT span nests under the cubepi recorder's
+        # execute_tool span when tracing is enabled.
+        del on_update
         args_dict = (
             args.model_dump(exclude_none=True)
             if hasattr(args, "model_dump")
             else dict(args)
         )
-        result = await call_remote(name, args_dict)
+        async with mcp_client_span(
+            method="tools/call",
+            tool_name=name,
+            session_id=session_id,
+            protocol_version=protocol_version,
+            server_address=server_address,
+            server_port=server_port,
+            parent_tool_call_id=tool_call_id,
+        ) as span:
+            result = await call_remote(name, args_dict)
+            # MCP server-reported tool failure (``isError: true``): the
+            # JSON-RPC call succeeded but the tool's logic failed. Mark
+            # the CLIENT span ERROR so backends count it as a failure,
+            # matching the cubepi.tool.is_error treatment for non-MCP
+            # tool spans.
+            if result.get("isError"):
+                mark_span_mcp_error(span, "MCP server returned isError")
         content_blocks: list[Content] = []
         for c in result.get("content", []):
             ctype = c.get("type")

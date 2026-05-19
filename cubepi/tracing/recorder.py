@@ -129,6 +129,10 @@ class _RunState:
     chat_open_ns: int | None = None
     chat_first_chunk_recorded: bool = False
     tool_spans: dict[str, Any] = field(default_factory=dict)
+    # contextvars.Token per tool_call_id, returned by
+    # ``cubepi.mcp._tracing.register_tool_span``. Passed back on
+    # ``unregister_tool_span`` to restore the prior contextvar state.
+    tool_span_tokens: dict[str, Any] = field(default_factory=dict)
     # Caller-supplied extra attrs for this run (set via run_scope, future).
     extra_attrs: dict[str, Any] = field(default_factory=dict)
     # Counts for invoke_agent attrs.
@@ -208,32 +212,43 @@ class Recorder:
                 provider.subscribe_response(self._on_provider_response)
             )
 
-        async def _detach_async() -> None:
+        def _sync_detach() -> None:
+            """All synchronous cleanup: unsubscribe + sweep leaked
+            registrations. Runs eagerly in ``detach()`` so the
+            cancellation-leak cleanup is observable on the next line —
+            not deferred to a loop tick that may never arrive if the
+            caller immediately awaits ``tracer.shutdown()`` or exits
+            ``asyncio.run`` (codex round-11).
+            """
             unsub_agent()
             for d in provider_detachers:
                 try:
                     d()
                 except Exception:
                     pass
+            # Final cleanup of any leaked tool-span registrations from
+            # a cancelled run — CancelledError bypasses the agent's
+            # ``except Exception`` handler so _on_agent_end /
+            # _on_tool_exec_end never fire (codex round-10).
+            self._sweep_tool_span_tokens(self._run)
+
+        async def _detach_async() -> None:
+            _sync_detach()
             await self._tracer.force_flush()
 
         def detach() -> None:
-            # Synchronous shim. Tests can also call ``detach_async``.
-            import asyncio
-
+            # Synchronous part runs immediately in either path so the
+            # caller can rely on cleanup having happened by the time
+            # ``detach()`` returns.
+            _sync_detach()
             try:
+                import asyncio
+
                 loop = asyncio.get_running_loop()
             except RuntimeError:
-                # No running loop — best-effort sync detach.
-                unsub_agent()
-                for d in provider_detachers:
-                    try:
-                        d()
-                    except Exception:
-                        pass
-                return
-            # Inside a loop — schedule the async detach.
-            loop.create_task(_detach_async())
+                return  # no loop — sync cleanup already done.
+            # Inside a loop — schedule the remaining async flush.
+            loop.create_task(self._tracer.force_flush())
 
         return detach
 
@@ -270,7 +285,45 @@ class Recorder:
     # invoke_agent
     # ------------------------------------------------------------------
 
+    def _sweep_tool_span_tokens(self, run: "_RunState | None") -> None:
+        """Drain ``run.tool_span_tokens`` through ``unregister_tool_span``.
+
+        The cubepi agent loop emits ``ToolExecutionEndEvent`` for every
+        tool that produced a ``ToolExecutionStartEvent`` *only on the
+        ``Exception`` path*. ``asyncio.CancelledError`` inherits from
+        ``BaseException`` and bypasses that handler, so a run cancelled
+        while an MCP tool was in flight leaves the registration alive
+        in :mod:`cubepi.mcp._tracing._active_entries`. Repeated aborts
+        would leak parent-span/provider pairs for the lifetime of the
+        process.
+
+        We sweep on agent_start (next run reuses this Recorder),
+        agent_end (normal completion + agent-caught errors), and on
+        detach (final safety net for an aborted run that never starts
+        again). This is the cleanup path codex round-10 requested.
+        """
+        if run is None or not run.tool_span_tokens:
+            return
+        try:
+            from cubepi.mcp import _tracing as _mcp_tracing
+        except ImportError:  # pragma: no cover — mcp module always present
+            run.tool_span_tokens.clear()
+            return
+        for token in list(run.tool_span_tokens.values()):
+            try:
+                _mcp_tracing.unregister_tool_span(token)
+            except Exception:
+                pass
+        run.tool_span_tokens.clear()
+
     def _on_agent_start(self) -> None:
+        # Defensive sweep: if a prior run was cancelled (CancelledError
+        # inherits BaseException — cubepi's agent loop doesn't emit
+        # ToolExecutionEndEvent in that path), its tool-span registrations
+        # could still be live in cubepi.mcp._tracing. Clean before
+        # opening the new _RunState.
+        self._sweep_tool_span_tokens(self._run)
+
         run_id = str(uuid.uuid4())
         # Open the root invoke_agent span. Caller-context propagation
         # (parent_trace_id / parent_span_id from a host service) lands
@@ -324,6 +377,10 @@ class Recorder:
                     GEN_AI_OUTPUT_MESSAGES,
                     messages_to_semconv(run.output_messages),
                 )
+        # Final sweep for normal-end (and agent-caught error) paths.
+        # Cancellation skips this hook entirely — see
+        # ``_sweep_tool_span_tokens`` docstring.
+        self._sweep_tool_span_tokens(run)
         run.agent_span.end()
         self._run = None
 
@@ -439,6 +496,25 @@ class Recorder:
             attributes=attrs,
         )
         run.tool_spans[event.tool_call_id] = span
+        # Expose this execute_tool span (and its owning provider) to
+        # ``cubepi.mcp._tracing`` via a per-task contextvar so an MCP
+        # tool call running inside the AgentTool body inherits the
+        # right parent. Per-task scoping avoids the global-dict
+        # collision when concurrent agents reuse the same tool_call_id
+        # (e.g. Faux/OpenAI-style providers minting ``tc1`` per
+        # conversation — codex round-8). The recorder stashes the
+        # contextvar reset token on _RunState to undo on exec_end.
+        try:
+            from cubepi.mcp import _tracing as _mcp_tracing
+
+            cv_token = _mcp_tracing.register_tool_span(
+                event.tool_call_id,
+                span,
+                provider=self._tracer._provider,
+            )
+            run.tool_span_tokens[event.tool_call_id] = cv_token
+        except ImportError:  # pragma: no cover — mcp module always present
+            pass
         if self._record_content and event.args is not None:
             self._set_content_attr(
                 span, GEN_AI_TOOL_CALL_ARGUMENTS, _coerce_dict(event.args)
@@ -449,6 +525,13 @@ class Recorder:
         if run is None:
             return
         span = run.tool_spans.pop(event.tool_call_id, None)
+        cv_token = run.tool_span_tokens.pop(event.tool_call_id, None)
+        try:
+            from cubepi.mcp import _tracing as _mcp_tracing
+
+            _mcp_tracing.unregister_tool_span(cv_token)
+        except ImportError:  # pragma: no cover — mcp module always present
+            pass
         if span is None:
             return
         span.set_attribute(CUBEPI_TOOL_IS_ERROR, event.is_error)
