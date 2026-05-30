@@ -423,7 +423,10 @@ class OpenAIProvider(BaseProvider):
                     finish_reason = (
                         chunk.choices[0].finish_reason if chunk.choices else None
                     )
-                    if finish_reason:
+                    # Some providers (e.g. Volcano Engine) repeat the same
+                    # finish_reason in a subsequent chunk. Only process it once
+                    # to avoid duplicate toolcall_end / text_end events.
+                    if finish_reason and not final_finish_reason:
                         final_finish_reason = finish_reason
                         if thinking_started:
                             await self._emit(
