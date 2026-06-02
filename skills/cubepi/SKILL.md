@@ -78,20 +78,47 @@ https://cubepi.ai/docs/guides/streaming
 
 ### Middleware
 
-Seven typed hooks (`before_model_request`, `after_model_response`,
-`before_tool_call`, `after_tool_call`, `on_turn_start`, `on_turn_end`,
-`on_agent_end`). Declare with `@middleware` and compose with `compose_middleware`:
+Eight typed hooks. Subclass `Middleware`, override the hooks you need, pass instances
+to `Agent(middleware=[...])`:
 
 ```python
-from cubepi.middleware import middleware, compose_middleware
+from cubepi import Middleware
 
-@middleware
-async def log_calls(ctx, next):
-    print(f"tool: {ctx.tool_name}")
-    return await next(ctx)
+class MyMiddleware(Middleware):
+    async def transform_context(self, messages, *, signal=None):
+        return messages          # filter / inject messages before each LLM call
 
-agent = Agent(..., middleware=compose_middleware(log_calls, other_middleware))
+    async def transform_system_prompt(self, sp, *, signal=None):
+        return sp + "\nExtra."  # append to system prompt
+
+    async def before_tool_call(self, ctx, *, signal=None):
+        return None              # BeforeToolCallResult(block=True) to deny
+
+    async def after_tool_call(self, ctx, *, signal=None):
+        return None              # AfterToolCallResult(...) to override result
+
+    async def after_model_response(self, response, ctx, *, signal=None):
+        return None              # TurnAction(decision="stop"|"loop_to_model")
+
+    async def should_stop_after_turn(self, ctx) -> bool:
+        return False             # True to end run after this turn
+
+    async def on_run_end(self, ctx, *, signal=None):
+        return None              # list[Message] to inject + run one extra turn
+
+agent = Agent(..., middleware=[MyMiddleware()])
 ```
+
+| Hook | Fires | Composition |
+|---|---|---|
+| `transform_context` | Before each model call | Chained |
+| `convert_to_llm` | Right before serialisation | Last wins |
+| `transform_system_prompt` | Before each model call | Chained |
+| `before_tool_call` | Per tool call | First block stops |
+| `after_tool_call` | Per tool call | Later overrides earlier |
+| `after_model_response` | After assistant message | Chain; last decision wins |
+| `should_stop_after_turn` | Each turn boundary | Any True stops |
+| `on_run_end` | Once after all turns, before agent_end | Messages concatenate |
 
 Full docs: https://cubepi.ai/docs/guides/middleware
 

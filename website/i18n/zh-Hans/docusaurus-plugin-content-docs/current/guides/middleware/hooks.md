@@ -1,11 +1,11 @@
 ---
-title: 7 个 Hook
-description: "CubePi 的 7 个中间件 hook 参考——transform_context、before_tool_call、after_tool_call 等。"
+title: 8 个 Hook
+description: "CubePi 的 8 个中间件 hook 参考——transform_context、before_tool_call、after_tool_call、on_run_end 等。"
 ---
 
-# 7 个 Hook
+# 8 个 Hook
 
-`Middleware` 是一个最多包含七个可选异步方法的类。每个 hook 在 agent
+`Middleware` 是一个最多包含八个可选异步方法的类。每个 hook 在 agent
 循环中的精确位置触发。只实现你需要的——CubePi 只会连接你重写了的方法。
 
 ```python
@@ -163,6 +163,38 @@ TurnAction(
 组合方式：链式——每个中间件看到前一个中间件的 `response`；
 `inject_messages` 跨链拼接；最后一个中间件的 `decision` 胜出。
 
+## `on_run_end`
+
+```python
+async def on_run_end(
+    self,
+    ctx: AgentContext,
+    *,
+    signal=None,
+) -> list[Message] | None:
+    ...
+```
+
+**每次 `prompt()` 调用结束时触发一次**——所有轮次和工具调用完成后、
+`AgentEndEvent` 发出前。返回非空 `list[Message]` 会将这些消息注入上下文
+并运行**一轮额外的模型调用**（run-end pass）。返回 `None` 或 `[]` 不做任何操作。
+
+额外轮次只触发一次——循环内的 `_reflection_fired` 标志阻止注入轮次再次触发
+`on_run_end`。
+
+**何时触发：**
+- 正常完成（所有轮次结束后循环自然 break）。
+- `should_stop_after_turn` 返回 `True`。
+- `after_model_response` 返回 `decision="stop"`。
+
+**何时不触发：**
+- run 以 `stop_reason` 为 `"error"` 或 `"aborted"` 结束。
+- HITL 中断（`HitlDetached` / `HitlAborted`）——run 是暂停而非结束。
+
+用于：run 结束后的记忆提炼、对话摘要、需要完整轮次上下文的审计日志。
+
+组合方式：所有中间件返回的消息**拼接**为单一列表，一起注入额外模型轮次。
+
 ## 中间件的构成
 
 一个中间件不需要实现每一个 hook。只覆盖你需要的即可；基类中未实现
@@ -187,4 +219,4 @@ agent = Agent(provider=…, model=…, middleware=[MaxTurnsMiddleware(5)])
 ## 另请参阅
 
 - [组合规则](./composition) —— 多个中间件定义同一 hook 时的精确语义。
-- [示例](./examples) —— 速率限制、日志、重试、滑动窗口上下文的实用中间件。
+- [示例](./examples) —— 速率限制、日志、重试、滑动窗口上下文、run 结束后记忆的实用中间件。

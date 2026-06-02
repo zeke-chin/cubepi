@@ -104,7 +104,7 @@ class Provider(Protocol):
 
 ## Middleware
 
-`Middleware` 是有最多七个类型化 hook 的类：
+`Middleware` 是有最多八个类型化 hook 的类：
 
 | Hook | 何时触发 | 组合规则 |
 |---|---|---|
@@ -115,6 +115,7 @@ class Provider(Protocol):
 | `after_tool_call` | 每个工具调用之后(在 `execute` 之后) | 后写覆盖先写 |
 | `after_model_response` | assistant 消息落定之后 | 返回 `TurnAction` 控制流向 |
 | `should_stop_after_turn` | 每个轮次结束时 | 任一返回 `True` 即停 |
+| `on_run_end` | 所有轮次完成后一次，`agent_end` 之前 | 消息拼接；非空触发一轮额外调用 |
 
 通过 `Agent(middleware=[...])` 传入。见
 [Middleware → 组合规则](../guides/middleware/composition)。

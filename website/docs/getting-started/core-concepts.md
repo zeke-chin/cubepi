@@ -112,7 +112,7 @@ Subscribe to agent events for UI; for low-level token routing dig into
 
 ## Middleware
 
-`Middleware` is a class with up to seven typed hooks:
+`Middleware` is a class with up to eight typed hooks:
 
 | Hook | When it runs | Composition rule |
 |---|---|---|
@@ -123,6 +123,7 @@ Subscribe to agent events for UI; for low-level token routing dig into
 | `after_tool_call` | Per tool call, after `execute` | Later override earlier |
 | `after_model_response` | After the assistant message lands | Returns a `TurnAction` controlling flow |
 | `should_stop_after_turn` | At each turn boundary | Any `True` stops |
+| `on_run_end` | Once after all turns complete, before `agent_end` | Messages concatenate; non-empty triggers one extra turn |
 
 Pass middleware as a list to `Agent(middleware=[...])`. See
 [Middleware → Composition](../guides/middleware/composition).

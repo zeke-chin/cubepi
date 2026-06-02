@@ -1,11 +1,11 @@
 ---
-title: The 7 Hooks
-description: "Reference for the 7 middleware hooks in CubePi — transform_context, convert_to_llm, before_tool_call, after_tool_call, and more."
+title: The 8 Hooks
+description: "Reference for the 8 middleware hooks in CubePi — transform_context, convert_to_llm, before_tool_call, after_tool_call, on_run_end, and more."
 ---
 
-# The 7 Hooks
+# The 8 Hooks
 
-`Middleware` is a class with up to seven optional async methods. Each
+`Middleware` is a class with up to eight optional async methods. Each
 hook fires at a precise point in the agent loop. Implement only the
 ones you need — CubePi only wires in the ones you override.
 
@@ -176,6 +176,43 @@ Composition: chain — each middleware sees the previous
 middleware's `response`; `inject_messages` concatenate across the
 chain; the last middleware's `decision` wins.
 
+## `on_run_end`
+
+```python
+async def on_run_end(
+    self,
+    ctx: AgentContext,
+    *,
+    signal=None,
+) -> list[Message] | None:
+    ...
+```
+
+Fires **once per `prompt()` call**, after all turns and tool calls
+complete, before `AgentEndEvent` is emitted. Return a non-empty
+`list[Message]` to inject those messages into context and run **one
+extra model turn** (the run-end pass). Return `None` or `[]` to do
+nothing.
+
+The extra turn fires exactly once — a `_reflection_fired` guard in the
+loop prevents the injected turn from triggering another `on_run_end`.
+
+**When it fires:**
+- Normal completion (loop breaks naturally after all turns).
+- `should_stop_after_turn` returns `True`.
+- `after_model_response` returns `decision="stop"`.
+
+**When it does NOT fire:**
+- The run ends with `stop_reason` `"error"` or `"aborted"`.
+- HITL interruption (`HitlDetached` / `HitlAborted`) — the run is
+  paused, not finished.
+
+Use for: post-run memory consolidation, conversation summarisation,
+audit logging that needs the full turn context.
+
+Composition: messages from all middleware **concatenate** into a single
+list; all are injected together before the extra model turn.
+
 ## Anatomy of a middleware
 
 A middleware doesn't have to implement every hook. Only override the
@@ -204,4 +241,4 @@ agent = Agent(provider=…, model=…, middleware=[MaxTurnsMiddleware(5)])
 - [Composition Rules](./composition) — exact semantics when multiple
   middlewares define the same hook.
 - [Examples](./examples) — working middleware for rate limiting,
-  logging, retries, sliding-window context.
+  logging, retries, sliding-window context, post-run memory.

@@ -20,6 +20,7 @@ description: "了解 CubePi 如何通过 per-hook 规则组合多个中间件。
 | `after_tool_call` | **后面覆盖前面** | 最后写入胜出 |
 | `should_stop_after_turn` | **任一 True 即停止**（OR） | 否 |
 | `after_model_response` | **带合并语义的链式** | 见下文 |
+| `on_run_end` | **消息拼接**——非空触发一轮额外调用 | 否 |
 
 ## `transform_context` 和 `transform_system_prompt`
 
@@ -151,7 +152,13 @@ class JustTransform(Middleware):
     # 没有其他 hook。CubePi 不会调用它们。
 ```
 
+## `on_run_end`
+
+所有返回非空列表的中间件都会贡献消息；消息拼接为单一列表，在额外模型轮次
+之前注入。返回 `None` 或 `[]` 的中间件被跳过。由于所有中间件都贡献，顺序
+不影响消息是否被注入——只影响注入列表内的相对顺序。
+
 ## 另请参阅
 
-- [7 个 Hook](./hooks) —— 每个 hook 的作用及触发时机。
+- [8 个 Hook](./hooks) —— 每个 hook 的作用及触发时机。
 - [示例](./examples) —— 组合在实践中的应用。

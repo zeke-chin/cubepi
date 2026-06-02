@@ -22,6 +22,7 @@ to remember "before" or "after" precedence guesses.
 | `after_tool_call` | **Later overrides earlier** | Last write wins |
 | `should_stop_after_turn` | **Any `True` stops** (OR) | No |
 | `after_model_response` | **Chain with merge semantics** | See below |
+| `on_run_end` | **Messages concatenate** — non-empty triggers one extra turn | No |
 
 ## `transform_context` and `transform_system_prompt`
 
@@ -170,7 +171,15 @@ class JustTransform(Middleware):
     # No other hooks. CubePi won't call them.
 ```
 
+## `on_run_end`
+
+All middleware returning non-empty lists contribute; their messages are
+concatenated into a single list and injected before the extra model
+turn. Middleware returning `None` or `[]` are skipped. Because all
+contribute, order doesn't affect whether messages are injected — only
+their relative order within the injected list.
+
 ## See also
 
-- [The 7 Hooks](./hooks) — what each hook does and when it fires.
+- [The 8 Hooks](./hooks) — what each hook does and when it fires.
 - [Examples](./examples) — composition in practice.
