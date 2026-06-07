@@ -22,6 +22,7 @@ const sidebars: SidebarsConfig = {
           'guides/agents/tool-use',
           'guides/agents/multi-turn',
           'guides/agents/streaming',
+          'guides/agents/forking',
         ]},
         { type: 'category', label: 'Providers', items: [
           'guides/providers/overview',
@@ -34,7 +35,6 @@ const sidebars: SidebarsConfig = {
           'guides/checkpointing/sqlite',
           'guides/checkpointing/postgres',
           'guides/checkpointing/mysql',
-          'guides/checkpointing/forking',
           'guides/checkpointing/custom',
         ]},
         { type: 'category', label: 'Middleware', items: [

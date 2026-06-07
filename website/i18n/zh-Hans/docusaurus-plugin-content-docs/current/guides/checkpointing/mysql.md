@@ -157,7 +157,7 @@ cubepi_schema_version
 的 claim/completion 状态。
 
 用户层 API 与语义详见
-[会话 Fork 指南](./forking)。
+[会话 Fork 指南](../agents/forking)。
 
 ## Schema v3 → v4 migration {#schema-v3--v4-migration}
 
@@ -184,7 +184,7 @@ def upgrade():
 
 `upgrade_v3_to_v4_op()` 在重复执行下是幂等的。升级前的旧消息
 保留 `run_id = NULL`，仍然可读；关于混合数据的 fork 资格规则，
-请参阅 [旧数据行为](./forking#legacy-data-behaviour)。
+请参阅 [旧数据行为](../agents/forking#legacy-data-behaviour)。
 
 ## 常见陷阱
 

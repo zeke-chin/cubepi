@@ -192,7 +192,7 @@ so it supports both `Agent.fork(...)` and `Agent.fork_once(...)`. The
 record fork lineage; `cubepi_runs` (added in v4) tracks per-run
 claim/completion state.
 
-See the [Conversation Forking](./forking) guide for the user-facing
+See the [Conversation Forking](../agents/forking) guide for the user-facing
 API and semantics.
 
 ## Schema v3 → v4 migration
@@ -221,7 +221,7 @@ def upgrade():
 
 `upgrade_v3_to_v4_op()` is idempotent under repeated execution.
 Pre-feature messages keep `run_id = NULL` and remain readable; see
-[Legacy data behaviour](./forking#legacy-data-behaviour) for the
+[Legacy data behaviour](../agents/forking#legacy-data-behaviour) for the
 fork-eligibility rules on mixed threads.
 
 ## Common pitfalls

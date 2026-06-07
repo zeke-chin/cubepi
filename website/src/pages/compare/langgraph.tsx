@@ -70,8 +70,9 @@ async def get_weather(city: str) -> str:
     return f"72F and sunny in {city}"
 
 
+provider = AnthropicProvider(provider_id="anthropic", api_key="...")
 agent = Agent(
-    model=AnthropicProvider(provider_id="anthropic", api_key="...").model("claude-sonnet-4-5"),
+    model=provider.model("claude-sonnet-4-5"),
     tools=[get_weather],
 )
 await agent.prompt("Weather in Tokyo?")
@@ -94,7 +95,7 @@ await agent.prompt("Weather in Tokyo?")
     {
       h2: 'When LangGraph is the better fit',
       body: [
-        'LangGraph is the better choice if you genuinely need arbitrary multi-agent supervisor graphs, visual graph rendering, or time-travel/fork at arbitrary checkpoints today — CubePi keeps its flow linear by design and emits vendor-neutral OpenTelemetry rather than shipping its own trace UI. If your agent is fundamentally a loop, CubePi removes the graph machinery you were not really using.',
+        'LangGraph is the better choice if you genuinely need arbitrary multi-agent supervisor graphs or visual graph rendering — CubePi keeps its flow linear by design and emits vendor-neutral OpenTelemetry rather than shipping its own trace UI. CubePi has `Agent.fork()` and `Agent.fork_once()` for branching at completed-run boundaries; LangGraph supports finer-grained mid-run checkpoint forks if you need that granularity. If your agent is fundamentally a loop, CubePi removes the graph machinery you were not really using.',
       ],
     },
   ],
@@ -172,8 +173,9 @@ async def get_weather(city: str) -> str:
     return f"72F and sunny in {city}"
 
 
+provider = AnthropicProvider(provider_id="anthropic", api_key="...")
 agent = Agent(
-    model=AnthropicProvider(provider_id="anthropic", api_key="...").model("claude-sonnet-4-5"),
+    model=provider.model("claude-sonnet-4-5"),
     tools=[get_weather],
 )
 await agent.prompt("Weather in Tokyo?")
@@ -196,7 +198,7 @@ await agent.prompt("Weather in Tokyo?")
     {
       h2: '什么时候 LangGraph 更合适',
       body: [
-        '如果你现在确实需要任意的多 agent supervisor 图、可视化图渲染,或在任意检查点做时间旅行/分叉,那么 LangGraph 更合适 —— CubePi 在设计上保持流程线性,并输出厂商中立的 OpenTelemetry,而不是自带一套 trace UI。但如果你的 agent 本质上就是一个循环,CubePi 帮你去掉了那些你其实没真正用上的图机制。',
+        '如果你确实需要任意的多 agent supervisor 图或可视化图渲染,LangGraph 更合适 —— CubePi 在设计上保持流程线性,并输出厂商中立的 OpenTelemetry,而不是自带一套 trace UI。CubePi 已有 `Agent.fork()` 和 `Agent.fork_once()` 在已完成的 run 边界处分叉;如果你需要 mid-run 粒度的任意检查点分叉,LangGraph 粒度更细。但如果你的 agent 本质上就是一个循环,CubePi 帮你去掉了那些你其实没真正用上的图机制。',
       ],
     },
   ],

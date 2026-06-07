@@ -241,10 +241,10 @@ deployments (cubebox's default) aren't affected.
 
 ## See also
 
-- [Postgres Checkpointing](./postgres) — production backend with v4 schema.
-- [MySQL Checkpointing](./mysql) — MySQL sibling with v4 schema.
-- [SQLite Checkpointing](./sqlite) — single-process backend with auto-migration.
-- [Custom Backends](./custom) — Protocol details, including the new
+- [Postgres Checkpointing](../checkpointing/postgres) — production backend with v4 schema.
+- [MySQL Checkpointing](../checkpointing/mysql) — MySQL sibling with v4 schema.
+- [SQLite Checkpointing](../checkpointing/sqlite) — single-process backend with auto-migration.
+- [Custom Backends](../checkpointing/custom) — Protocol details, including the new
   `snapshot`, `fork`, `claim_run`, `mark_run_complete`, `load_pending`
   methods you need to implement for fork support.
 - [HITL Overview](../hitl/overview) — channel/binding mechanics.

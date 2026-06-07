@@ -144,7 +144,7 @@ If you need multi-process writers on shared threads, jump to
 `SQLiteCheckpointer` implements the v4 `snapshot` / `fork` /
 `claim_run` / `mark_run_complete` / `load_pending` Protocol methods,
 so it supports both `Agent.fork(...)` and `Agent.fork_once(...)`. See
-the [Conversation Forking](./forking) guide for the user-facing API.
+the [Conversation Forking](../agents/forking) guide for the user-facing API.
 
 ## Schema v3 → v4 migration
 
@@ -155,7 +155,7 @@ the first time a v4 CubePi connects to a v3 file. No host action is
 required.
 
 Pre-feature messages keep `run_id = NULL` and remain readable; see
-[Legacy data behaviour](./forking#legacy-data-behaviour) for the
+[Legacy data behaviour](../agents/forking#legacy-data-behaviour) for the
 fork-eligibility rules on mixed threads.
 
 ## Where the file lives

@@ -22,7 +22,8 @@
             "guides/agents/first-agent",
             "guides/agents/tool-use",
             "guides/agents/multi-turn",
-            "guides/agents/streaming"
+            "guides/agents/streaming",
+            "guides/agents/forking"
           ]
         },
         {
@@ -43,8 +44,7 @@
             "guides/checkpointing/sqlite",
             "guides/checkpointing/postgres",
             "guides/checkpointing/mysql",
-            "guides/checkpointing/forking",
-            "guides/checkpointing/custom"
+"guides/checkpointing/custom"
           ]
         },
         {

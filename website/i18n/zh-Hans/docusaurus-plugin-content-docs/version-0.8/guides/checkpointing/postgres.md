@@ -158,7 +158,7 @@ extra = cubepi_threads.extra || EXCLUDED.extra
 ## Fork
 
 `parent_thread_id` + `forked_at_seq` 列用于支持
-[会话 Fork](./forking)：fork 会创建一个新的 thread，并在其
+[会话 Fork](../agents/forking)：fork 会创建一个新的 thread，并在其
 `cubepi_threads` 行中写入指向源 thread 的 `parent_thread_id`，
 以及拷贝时源 thread 末尾的 `forked_at_seq`（最后一条已拷贝消息的
 `seq`）。
@@ -186,7 +186,7 @@ def upgrade():
 
 升级前的旧消息保留 `run_id = NULL`，仍然可读；
 关于混合数据的 fork 资格规则，请参阅
-[旧数据行为](./forking#legacy-data-behaviour)。
+[旧数据行为](../agents/forking#legacy-data-behaviour)。
 
 ## 常见坑
 

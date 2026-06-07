@@ -24,6 +24,7 @@ without having to re-learn from scratch.
 | **Tools as `@tool` decorated functions** | `AgentTool` with Pydantic params + async execute | Closer to OpenAI/Anthropic native shape |
 | **`HumanMessage`, `AIMessage`** | `UserMessage`, `AssistantMessage` | Same role-tagged messages, just renamed |
 | **Interrupts via `interrupt_before` / `interrupt_after`** | `agent.steer(...)`, `agent.follow_up(...)`, `agent.abort()` | Imperative control instead of declarative interrupt points |
+| **Time travel / fork** at any checkpoint | **`Agent.fork()`** / **`Agent.fork_once()`** at run boundaries | CubePi keys off completed `run_id`s; see [Forking](../guides/agents/forking) |
 | **`config_schema`** | Constructor parameters on `Agent` | No separate schema layer |
 
 ## Side-by-side: a tool-using agent
@@ -185,6 +186,35 @@ class SummariseAtEnd(Middleware):
 There's no built-in branching primitive; flow control happens through
 `should_stop_after_turn` and `after_model_response`.
 
+### Forking
+
+```python
+# langgraph — time travel to a saved checkpoint
+config = {"configurable": {"thread_id": "t1", "checkpoint_id": "<id>"}}
+app.update_state(config, {"messages": [...]})
+result = app.invoke(None, config)
+
+# CubePi — persistent fork at a completed-run boundary
+await agent.fork(
+    src_thread_id="conv_123",
+    new_thread_id="conv_456",
+    after_run_id="R1",
+)
+
+# CubePi — ephemeral one-shot probe (writes nothing)
+result = await agent.fork_once(
+    src_thread_id="conv_123",
+    message="What if you had said yes?",
+    after_run_id="R1",
+)
+print(result.text)
+```
+
+CubePi forks at completed-run boundaries rather than arbitrary mid-run
+checkpoints. `fork` creates a persistent branch you can continue;
+`fork_once` runs a single probe and discards everything. See
+[Conversation Forking](../guides/agents/forking).
+
 ## What langgraph does that CubePi doesn't (yet)
 
 - **Multi-agent supervisor patterns.** No first-class "agents
@@ -193,8 +223,6 @@ There's no built-in branching primitive; flow control happens through
 - **Visual graph rendering.** No `app.get_graph().draw_mermaid()`
   equivalent. CubePi's flow is linear so the picture would be a single
   line anyway.
-- **Time travel / fork** at arbitrary checkpoints. The Postgres schema
-  has fork columns but no API surface in v0.4.
 - **First-party UI for traces.** CubePi doesn't render its own trace
   visualizer the way LangSmith / Langfuse do; instead it emits
   vendor-neutral OpenTelemetry — point any OTLP backend
