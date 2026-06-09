@@ -76,6 +76,22 @@ html, body { font-feature-settings: 'cv11', 'ss01'; -webkit-font-smoothing: anti
 /* Tabular numerals globally in code and tables */
 code, pre, table td.num, .num { font-variant-numeric: tabular-nums; }
 
+/* On mobile, keep the GitHub icon visible in the header (right side).
+   Docusaurus hides .navbar__items--right entirely on small screens and
+   moves everything to the sidebar. Re-show the container but hide every
+   item inside it except the GitHub link. */
+@media (max-width: 996px) {
+  .navbar__items.navbar__items--right {
+    display: flex !important;
+  }
+  .navbar__items--right > *:not(.header-github-link) {
+    display: none !important;
+  }
+  .header-github-link {
+    display: flex !important;
+  }
+}
+
 /* GitHub icon in navbar (light + dark) */
 .header-github-link::before {
   content: '';
