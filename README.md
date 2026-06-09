@@ -7,7 +7,7 @@
 [![PyPI](https://img.shields.io/pypi/v/cubepi)](https://pypi.org/project/cubepi/)
 [![Python](https://img.shields.io/pypi/pyversions/cubepi)](https://pypi.org/project/cubepi/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![Docs](https://img.shields.io/badge/docs-cubepi.ai-blue)](https://cubepi.ai)
+[![Docs](https://img.shields.io/badge/Docs-cubepi.ai-blue?logo=data:image/svg%2Bxml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjEwNSAxMTAgMzAwIDM0NSI+CiAgPHBhdGggZmlsbD0id2hpdGUiIGQ9Ik0yNjEgMTE3IEwzOTYgMTgzIEwyNDQgMjUyIEwxMjAgMTgzIFoiLz4KICA8cGF0aCBmaWxsPSJ3aGl0ZSIgZD0iTTExNSAxOTggTDIzMiAyNjMgTDIzMiA0MzIgTDExNSAzNjUgWiIvPgogIDxwYXRoIGZpbGw9IndoaXRlIiBkPSJNMzU1IDM0NiBMMzk3IDM2NSBMMzk3IDM3NiBMMjUyIDQ0NiBMMjQ3IDQ0MiBMMjQ3IDM5NSBaIi8%2BCiAgPHJlY3QgZmlsbD0id2hpdGUiIHg9IjI4NyIgeT0iMjY4IiB3aWR0aD0iMjYiIGhlaWdodD0iNzQiIHJ4PSIxMiIvPgogIDxyZWN0IGZpbGw9IndoaXRlIiB4PSIzNTEiIHk9IjI0NyIgd2lkdGg9IjI2IiBoZWlnaHQ9Ijc2IiByeD0iMTIiLz4KPC9zdmc+)](https://cubepi.ai)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/cubeplexai/cubepi)
 [![skills.sh](https://skills.sh/b/cubeplexai/cubepi)](https://skills.sh/cubeplexai/cubepi)
 
