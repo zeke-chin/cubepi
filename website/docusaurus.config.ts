@@ -168,7 +168,12 @@ const config: Config = {
         { to: '/faq', label: 'FAQ', position: 'left' },
         { type: 'docsVersionDropdown', position: 'right' },
         { type: 'localeDropdown', position: 'right' },
-        { href: 'https://github.com/cubeplexai/cubepi', label: 'GitHub', position: 'right' },
+        {
+          href: 'https://github.com/cubeplexai/cubepi',
+          position: 'right',
+          className: 'header-github-link',
+          'aria-label': 'GitHub repository',
+        },
       ],
     },
     prism: {
