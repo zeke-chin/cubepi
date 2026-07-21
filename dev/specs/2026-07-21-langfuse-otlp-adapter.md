@@ -22,6 +22,9 @@ identity fields for sessions, users, and tags.
 - Normalize provider response bodies into `gen_ai.output.messages`, fixing a
   general Cubepi tracing omission rather than deriving Langfuse output from raw
   Anthropic/OpenAI payloads.
+- Treat `cubepi.turn` as an internal agent step. Its input is the transcript
+  consumed by the step's first model call; tool results belong to the following
+  response-after-tool step's input, not the step that produced them.
 
 ## Prior art and divergence
 
@@ -41,4 +44,3 @@ applications may enable it independently when needed.
 Langfuse input/output attributes are emitted only when `record_content=True`.
 The existing redaction hook runs before both standard and Langfuse attributes
 are written.
-

@@ -942,7 +942,6 @@ class Recorder:
                 + 1,
             )
             run.input_messages.append(msg)
-            run.turn_input_messages.append(msg)
             run.transcript.append(msg)
 
     def _on_message_end(self, event: MessageEndEvent) -> None:
@@ -975,6 +974,13 @@ class Recorder:
             return
         if _active_run.get() is not run:
             return
+        # ``cubepi.turn`` is one internal agent-loop step. Its input is the
+        # transcript consumed by the step's first model call. Snapshot here
+        # instead of accumulating MessageStart events: tool results are emitted
+        # before the producing TurnEnd, which previously attributed them to the
+        # wrong turn and left the response-after-tool turn with no input.
+        if not run.turn_input_messages:
+            run.turn_input_messages = list(run.transcript)
         ctx = trace.set_span_in_context(run.turn_span)
         attrs: dict[str, Any] = {
             GEN_AI_OPERATION_NAME: OP_CHAT,

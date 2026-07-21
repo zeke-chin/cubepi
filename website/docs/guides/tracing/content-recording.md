@@ -34,7 +34,7 @@ attributes per the OTel GenAI semconv:
 | Span | Content attributes added |
 |---|---|
 | `invoke_agent` | `gen_ai.system_instructions`, `gen_ai.input.messages`, `gen_ai.output.messages` |
-| `cubepi.turn` | `gen_ai.input.messages` (per-turn slice), `gen_ai.output.messages` (per-turn slice) |
+| `cubepi.turn` | `gen_ai.input.messages` (full transcript consumed by this agent step), `gen_ai.output.messages` (assistant response + tool results produced by the step) |
 | `chat <model>` | `gen_ai.system_instructions`, `gen_ai.input.messages`, `gen_ai.output.messages`, `gen_ai.tool.definitions`, `cubepi.llm.raw_request`, `cubepi.llm.raw_response` |
 | `execute_tool <tool_name>` | `gen_ai.tool.call.arguments`, `gen_ai.tool.call.result` |
 
@@ -43,6 +43,13 @@ context** the provider request actually carried — including prior assistant
 turns and tool results — not just the new user prompt. This matters for
 multi-turn tool-using runs: trace consumers can reconstruct exactly what
 the model saw at each call.
+
+Despite its historical name, `cubepi.turn` represents one internal agent-loop
+step, not one complete user interaction. A single `agent.prompt()` run may have
+several turns: one that requests a tool, followed by another that consumes the
+tool result and produces the final answer. Each turn records the transcript
+available when that step first calls the model, so response-after-tool turns do
+not have an empty input.
 
 ## Redacting before export
 
