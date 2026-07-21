@@ -35,7 +35,7 @@ attributes per the OTel GenAI semconv:
 |---|---|
 | `invoke_agent` | `gen_ai.system_instructions`, `gen_ai.input.messages`, `gen_ai.output.messages` |
 | `cubepi.turn` | `gen_ai.input.messages` (per-turn slice), `gen_ai.output.messages` (per-turn slice) |
-| `chat <model>` | `gen_ai.system_instructions`, `gen_ai.input.messages`, `gen_ai.tool.definitions`, `cubepi.llm.raw_request`, `cubepi.llm.raw_response` |
+| `chat <model>` | `gen_ai.system_instructions`, `gen_ai.input.messages`, `gen_ai.output.messages`, `gen_ai.tool.definitions`, `cubepi.llm.raw_request`, `cubepi.llm.raw_response` |
 | `execute_tool <tool_name>` | `gen_ai.tool.call.arguments`, `gen_ai.tool.call.result` |
 
 The `chat` span's `gen_ai.input.messages` contains the **full chronological

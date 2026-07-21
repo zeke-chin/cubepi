@@ -51,6 +51,7 @@ from cubepi.providers.base import (
 )
 from cubepi.tracing.content import (
     messages_to_semconv,
+    response_to_semconv_messages,
     serialize_for_attribute,
     system_instructions_to_semconv,
     tool_definitions_to_semconv,
@@ -598,6 +599,7 @@ class Recorder:
                 GEN_AI_PROVIDER_NAME: "cubepi",
             },
         )
+        self._tracer._adapter_span_start(span)
         # Resource carries gen_ai.agent.name at process level — agents
         # that vary per-run set their own value via _ensure_agent_name.
         self._run = _RunState(run_id=run_id, agent_span=span)
@@ -628,7 +630,12 @@ class Recorder:
         # schema keys (especially ``cubepi.run_id``, a per-span filtering
         # attribute) must stay recorder-controlled (codex P2 on PR #92).
         try:
-            from cubepi.tracing.context import _current_metadata, _current_tags
+            from cubepi.tracing.context import (
+                _current_metadata,
+                _current_session_id,
+                _current_tags,
+                _current_user_id,
+            )
 
             tags = _current_tags()
             if tags:
@@ -643,6 +650,13 @@ class Recorder:
                     span.set_attribute(f"cubepi.metadata.{key}", value)
                 except (TypeError, ValueError):
                     pass
+            self._tracer._adapter_run_context(
+                span,
+                session_id=_current_session_id(),
+                user_id=_current_user_id(),
+                tags=tags,
+                metadata=metadata,
+            )
         except ImportError:  # pragma: no cover — context module always available
             pass
 
@@ -748,6 +762,7 @@ class Recorder:
                 CUBEPI_RUN_ID: run.run_id,
             },
         )
+        self._tracer._adapter_span_start(run.turn_span)
         run.turn_terminated_by_tool = False
         run.turn_input_messages = []
         run.turn_output_messages = []
@@ -841,6 +856,7 @@ class Recorder:
             context=ctx,
             attributes=attrs,
         )
+        self._tracer._adapter_span_start(span)
         run.tool_spans[event.tool_call_id] = span
         # Expose this execute_tool span (and its owning provider) to
         # ``cubepi.mcp._tracing`` via a per-task contextvar so an MCP
@@ -1034,6 +1050,7 @@ class Recorder:
             context=ctx,
             attributes=attrs,
         )
+        self._tracer._adapter_span_start(chat_span)
         run.chat_span = chat_span
         run.chat_open_ns = time.time_ns()
         run.chat_first_chunk_recorded = False
@@ -1177,6 +1194,11 @@ class Recorder:
                     # itself (provider-shaped). Record both the raw
                     # response (JSON dict) for backends that prefer it,
                     # and the normalized output messages where derivable.
+                    output_messages = response_to_semconv_messages(body)
+                    if output_messages:
+                        self._set_content_attr(
+                            span, GEN_AI_OUTPUT_MESSAGES, output_messages
+                        )
                     self._set_content_attr(span, CUBEPI_LLM_RAW_RESPONSE, body)
             # Cooperative abort: providers may finish the response
             # listener with ``exc is None`` and a body whose finish
@@ -1258,6 +1280,7 @@ class Recorder:
             span.set_attribute(key, value)
         else:
             span.set_attribute(key, serialize_for_attribute(value))
+        self._tracer._adapter_content(span, key=key, value=value)
 
     def _find_tool(self, name: str):
         """Look up an :class:`AgentTool` by name on the attached agent.

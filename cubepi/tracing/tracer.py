@@ -32,6 +32,7 @@ from cubepi.tracing.schema import SCHEMA_URL, SCOPE_NAME
 if TYPE_CHECKING:
     from cubepi.agent.agent import Agent
     from cubepi.providers.base import BoundModel, Message
+    from cubepi.tracing.adapters import SpanAdapter
 
 
 class _OneShotSession:
@@ -152,6 +153,7 @@ class Tracer:
         agent_description: str | None = None,
         agent_version: str | None = None,
         exporters: list[SpanExporter] | None = None,
+        span_adapters: "list[SpanAdapter] | None" = None,
         record_content: bool = False,
         record_stream: bool = False,
         stream_dir: "str | Path | None" = None,
@@ -166,6 +168,8 @@ class Tracer:
             Path(stream_dir) if isinstance(stream_dir, str) else stream_dir
         )
         self._redact = redact
+        self._span_adapters = tuple(span_adapters or ())
+        self._disabled_span_adapters: set[int] = set()
         self._resource = resource or _build_resource(
             service_name=service_name,
             service_version=service_version,
@@ -235,6 +239,45 @@ class Tracer:
         process.
         """
         return self._redact
+
+    def _adapter_span_start(self, span: Any) -> None:
+        self._run_span_adapter_hook("on_span_start", span)
+
+    def _adapter_run_context(
+        self,
+        span: Any,
+        *,
+        session_id: str | None,
+        user_id: str | None,
+        tags: tuple[str, ...],
+        metadata: dict[str, Any],
+    ) -> None:
+        self._run_span_adapter_hook(
+            "on_run_context",
+            span,
+            session_id=session_id,
+            user_id=user_id,
+            tags=tags,
+            metadata=metadata,
+        )
+
+    def _adapter_content(self, span: Any, *, key: str, value: Any) -> None:
+        self._run_span_adapter_hook("on_content", span, key=key, value=value)
+
+    def _run_span_adapter_hook(self, hook: str, span: Any, **kwargs: Any) -> None:
+        for adapter in self._span_adapters:
+            if id(adapter) in self._disabled_span_adapters:
+                continue
+            try:
+                getattr(adapter, hook)(span, **kwargs)
+            except Exception:
+                self._disabled_span_adapters.add(id(adapter))
+                logging.getLogger(__name__).warning(
+                    "span adapter %s.%s failed and has been disabled",
+                    type(adapter).__name__,
+                    hook,
+                    exc_info=True,
+                )
 
     def attach(self, agent: "Agent") -> Callable[[], Any]:
         """Wire the cubepi recorder to ``agent``.
@@ -484,6 +527,12 @@ class Tracer:
         from opentelemetry.trace import SpanKind
 
         from cubepi.providers.base import BaseProvider as _BaseProvider
+        from cubepi.tracing.context import (
+            _current_metadata,
+            _current_session_id,
+            _current_tags,
+            _current_user_id,
+        )
         from cubepi.tracing.recorder import Recorder, _RunState, _active_run
         from cubepi.tracing.schema import (
             CUBEPI_RUN_ID,
@@ -498,6 +547,9 @@ class Tracer:
         )
         run_id = str(uuid.uuid4())
         provider = model.provider
+        context_metadata = _current_metadata()
+        context_tags = _current_tags()
+        merged_metadata = {**context_metadata, **(metadata or {})}
 
         root_attrs: dict[str, Any] = {
             GEN_AI_OPERATION_NAME: OP_INVOKE_AGENT,
@@ -510,7 +562,7 @@ class Tracer:
         # derived from the ``operation`` argument (which the documented
         # ``cubepi trace ls --meta oneshot_operation=...`` filter depends
         # on).
-        for k, v in (metadata or {}).items():
+        for k, v in merged_metadata.items():
             root_attrs[f"cubepi.metadata.{k}"] = v
         # Also expose operation under cubepi.metadata.* so the
         # `cubepi trace ls --meta oneshot_operation=...` filter works
@@ -521,6 +573,16 @@ class Tracer:
             name=SPAN_NAME_INVOKE_AGENT,
             kind=SpanKind.INTERNAL,
             attributes=root_attrs,
+        )
+        self._adapter_span_start(root_span)
+        if context_tags:
+            root_span.set_attribute("cubepi.tags", context_tags)
+        self._adapter_run_context(
+            root_span,
+            session_id=_current_session_id(),
+            user_id=_current_user_id(),
+            tags=context_tags,
+            metadata=merged_metadata,
         )
 
         # _RunState with turn_span = root_span so chat spans nest directly

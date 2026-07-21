@@ -113,6 +113,17 @@ def tool_definitions_to_semconv(payload: dict) -> list[dict[str, Any]]:
     return out
 
 
+def response_to_semconv_messages(body: dict[str, Any]) -> list[dict[str, Any]]:
+    """Normalize a provider response body into ``gen_ai.output.messages``."""
+    if "stop_reason" in body and isinstance(body.get("content"), list):
+        return [_anthropic_response_message(body)]
+    if isinstance(body.get("choices"), list):
+        return _openai_chat_response_messages(body["choices"])
+    if isinstance(body.get("output"), list):
+        return _openai_responses_messages(body["output"])
+    return []
+
+
 def serialize_for_attribute(value: Any) -> str:
     """JSON-encode an arbitrary value for placement on a span attribute.
 
@@ -170,3 +181,105 @@ def _text_of(content: list[Any]) -> str:
         if isinstance(block, TextContent):
             parts.append(block.text)
     return "".join(parts)
+
+
+def _anthropic_response_message(body: dict[str, Any]) -> dict[str, Any]:
+    parts: list[dict[str, Any]] = []
+    for block in body.get("content") or []:
+        if not isinstance(block, dict):
+            continue
+        block_type = block.get("type")
+        if block_type == "text":
+            parts.append({"type": "text", "content": block.get("text") or ""})
+        elif block_type == "thinking":
+            parts.append({"type": "reasoning", "content": block.get("thinking") or ""})
+        elif block_type == "tool_use":
+            parts.append(
+                {
+                    "type": "tool_call",
+                    "id": block.get("id") or "",
+                    "name": block.get("name") or "",
+                    "arguments": block.get("input") or {},
+                }
+            )
+    return {"role": body.get("role") or "assistant", "parts": parts}
+
+
+def _openai_chat_response_messages(choices: list[Any]) -> list[dict[str, Any]]:
+    messages: list[dict[str, Any]] = []
+    for choice in choices:
+        if not isinstance(choice, dict) or not isinstance(choice.get("message"), dict):
+            continue
+        message = choice["message"]
+        parts: list[dict[str, Any]] = []
+        content = message.get("content")
+        if isinstance(content, str):
+            parts.append({"type": "text", "content": content})
+        reasoning = message.get("reasoning_content")
+        if isinstance(reasoning, str):
+            parts.append({"type": "reasoning", "content": reasoning})
+        for tool_call in message.get("tool_calls") or []:
+            if not isinstance(tool_call, dict):
+                continue
+            function = tool_call.get("function") or {}
+            arguments = function.get("arguments") or {}
+            if isinstance(arguments, str):
+                try:
+                    arguments = json.loads(arguments)
+                except json.JSONDecodeError:
+                    pass
+            parts.append(
+                {
+                    "type": "tool_call",
+                    "id": tool_call.get("id") or "",
+                    "name": function.get("name") or "",
+                    "arguments": arguments,
+                }
+            )
+        messages.append({"role": message.get("role") or "assistant", "parts": parts})
+    return messages
+
+
+def _openai_responses_messages(output: list[Any]) -> list[dict[str, Any]]:
+    messages: list[dict[str, Any]] = []
+    for item in output:
+        if not isinstance(item, dict):
+            continue
+        item_type = item.get("type")
+        if item_type == "message":
+            parts: list[dict[str, Any]] = []
+            for block in item.get("content") or []:
+                if not isinstance(block, dict):
+                    continue
+                block_type = block.get("type")
+                if block_type in ("output_text", "text"):
+                    parts.append({"type": "text", "content": block.get("text") or ""})
+                elif block_type == "reasoning":
+                    parts.append(
+                        {
+                            "type": "reasoning",
+                            "content": block.get("text") or block.get("summary") or "",
+                        }
+                    )
+            messages.append({"role": item.get("role") or "assistant", "parts": parts})
+        elif item_type in ("function_call", "tool_call"):
+            arguments = item.get("arguments") or {}
+            if isinstance(arguments, str):
+                try:
+                    arguments = json.loads(arguments)
+                except json.JSONDecodeError:
+                    pass
+            messages.append(
+                {
+                    "role": "assistant",
+                    "parts": [
+                        {
+                            "type": "tool_call",
+                            "id": item.get("call_id") or item.get("id") or "",
+                            "name": item.get("name") or "",
+                            "arguments": arguments,
+                        }
+                    ],
+                }
+            )
+    return messages
