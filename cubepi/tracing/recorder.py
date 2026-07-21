@@ -34,6 +34,7 @@ from opentelemetry.trace import SpanKind, Status, StatusCode
 from cubepi.agent.types import (
     AgentEndEvent,
     AgentStartEvent,
+    AgentSuspendedEvent,
     MessageEndEvent,
     MessageStartEvent,
     TurnEndEvent,
@@ -51,6 +52,7 @@ from cubepi.providers.base import (
 )
 from cubepi.tracing.content import (
     messages_to_semconv,
+    response_to_semconv_messages,
     serialize_for_attribute,
     system_instructions_to_semconv,
     tool_definitions_to_semconv,
@@ -66,6 +68,7 @@ from cubepi.tracing.schema import (
     CUBEPI_LLM_THINKING_LEVEL,
     CUBEPI_OUTPUT_MESSAGES_COUNT,
     CUBEPI_RUN_ID,
+    CUBEPI_SUSPENDED,
     CUBEPI_TOOL_BLOCK_REASON,
     CUBEPI_TOOL_BLOCKED_BY_HOOK,
     CUBEPI_TOOL_EXECUTION_MODE,
@@ -415,6 +418,8 @@ class Recorder:
                 self._on_turn_end(event)
             elif isinstance(event, AgentEndEvent):
                 self._on_agent_end(event)
+            elif isinstance(event, AgentSuspendedEvent):
+                self._on_agent_suspended(event)
             # MessageUpdateEvent / ToolExecutionUpdateEvent: IGNORED.
         except Exception:
             # Recorders must never crash the agent.
@@ -598,6 +603,7 @@ class Recorder:
                 GEN_AI_PROVIDER_NAME: "cubepi",
             },
         )
+        self._tracer._adapter_span_start(span)
         # Resource carries gen_ai.agent.name at process level — agents
         # that vary per-run set their own value via _ensure_agent_name.
         self._run = _RunState(run_id=run_id, agent_span=span)
@@ -628,7 +634,12 @@ class Recorder:
         # schema keys (especially ``cubepi.run_id``, a per-span filtering
         # attribute) must stay recorder-controlled (codex P2 on PR #92).
         try:
-            from cubepi.tracing.context import _current_metadata, _current_tags
+            from cubepi.tracing.context import (
+                _current_metadata,
+                _current_session_id,
+                _current_tags,
+                _current_user_id,
+            )
 
             tags = _current_tags()
             if tags:
@@ -643,6 +654,13 @@ class Recorder:
                     span.set_attribute(f"cubepi.metadata.{key}", value)
                 except (TypeError, ValueError):
                     pass
+            self._tracer._adapter_run_context(
+                span,
+                session_id=_current_session_id(),
+                user_id=_current_user_id(),
+                tags=tags,
+                metadata=metadata,
+            )
         except ImportError:  # pragma: no cover — context module always available
             pass
 
@@ -726,6 +744,121 @@ class Recorder:
         self._reset_active_run()
         self._run = None
 
+    def _on_agent_suspended(self, event: AgentSuspendedEvent) -> None:
+        """Finalize a durable HITL pause without classifying it as an abort.
+
+        ``Agent.detach()`` intentionally ends the current process-local run and
+        a later ``Agent.respond()`` starts a new one. There is no
+        ``AgentEndEvent`` for the paused half, so the recorder must close its
+        spans here; leaving cleanup to ``detach()`` would incorrectly stamp the
+        whole trace as ``cubepi.aborted``.
+        """
+        del event
+        run = self._run
+        if run is None:
+            return
+
+        pending_assistant = next(
+            (
+                message
+                for message in reversed(run.transcript)
+                if getattr(message, "role", None) == "assistant"
+            ),
+            None,
+        )
+        if pending_assistant is not None:
+            if pending_assistant not in run.output_messages:
+                run.output_messages.append(pending_assistant)
+            if pending_assistant not in run.turn_output_messages:
+                run.turn_output_messages.append(pending_assistant)
+
+        for span in list(run.tool_spans.values()):
+            try:
+                span.set_attribute(CUBEPI_SUSPENDED, True)
+                span.end()
+            except Exception:
+                pass
+        run.tool_spans.clear()
+
+        if run.chat_span is not None:
+            try:
+                run.chat_span.set_attribute(CUBEPI_SUSPENDED, True)
+                run.chat_span.end()
+            except Exception:
+                pass
+            run.chat_span = None
+            run.chat_open_ns = None
+            run.chat_first_chunk_recorded = False
+
+        if run.turn_span is not None:
+            try:
+                run.turn_span.set_attribute(CUBEPI_SUSPENDED, True)
+                if pending_assistant is not None:
+                    stop_reason = getattr(pending_assistant, "stop_reason", None)
+                    if stop_reason:
+                        run.turn_span.set_attribute(
+                            CUBEPI_TURN_STOP_REASON, stop_reason
+                        )
+                    tool_calls_count = sum(
+                        1
+                        for content in getattr(pending_assistant, "content", [])
+                        if getattr(content, "type", "") == "tool_call"
+                    )
+                    run.turn_span.set_attribute(
+                        CUBEPI_TURN_TOOL_CALLS_COUNT, tool_calls_count
+                    )
+                if self._record_content:
+                    if run.turn_input_messages:
+                        self._set_content_attr(
+                            run.turn_span,
+                            GEN_AI_INPUT_MESSAGES,
+                            messages_to_semconv(run.turn_input_messages),
+                        )
+                    if run.turn_output_messages:
+                        self._set_content_attr(
+                            run.turn_span,
+                            GEN_AI_OUTPUT_MESSAGES,
+                            messages_to_semconv(run.turn_output_messages),
+                        )
+                run.turn_span.end()
+            except Exception:
+                pass
+            run.turn_span = None
+
+        run.agent_span.set_attribute(CUBEPI_SUSPENDED, True)
+        run.agent_span.set_attribute(
+            CUBEPI_OUTPUT_MESSAGES_COUNT, len(run.output_messages)
+        )
+        if self._record_content:
+            if run.system_prompt:
+                self._set_content_attr(
+                    run.agent_span,
+                    GEN_AI_SYSTEM_INSTRUCTIONS,
+                    system_instructions_to_semconv(run.system_prompt),
+                )
+            if run.input_messages:
+                self._set_content_attr(
+                    run.agent_span,
+                    GEN_AI_INPUT_MESSAGES,
+                    messages_to_semconv(run.input_messages),
+                )
+            if run.output_messages:
+                self._set_content_attr(
+                    run.agent_span,
+                    GEN_AI_OUTPUT_MESSAGES,
+                    messages_to_semconv(run.output_messages),
+                )
+        self._sweep_tool_span_tokens(run)
+        run.agent_span.end()
+        if run.stream_file is not None:
+            try:
+                run.stream_file.close()
+            except Exception:
+                pass
+            run.stream_file = None
+        self._reset_active_run()
+        self._run = None
+
     # ------------------------------------------------------------------
     # cubepi.turn
     # ------------------------------------------------------------------
@@ -748,6 +881,7 @@ class Recorder:
                 CUBEPI_RUN_ID: run.run_id,
             },
         )
+        self._tracer._adapter_span_start(run.turn_span)
         run.turn_terminated_by_tool = False
         run.turn_input_messages = []
         run.turn_output_messages = []
@@ -841,6 +975,7 @@ class Recorder:
             context=ctx,
             attributes=attrs,
         )
+        self._tracer._adapter_span_start(span)
         run.tool_spans[event.tool_call_id] = span
         # Expose this execute_tool span (and its owning provider) to
         # ``cubepi.mcp._tracing`` via a per-task contextvar so an MCP
@@ -926,7 +1061,6 @@ class Recorder:
                 + 1,
             )
             run.input_messages.append(msg)
-            run.turn_input_messages.append(msg)
             run.transcript.append(msg)
 
     def _on_message_end(self, event: MessageEndEvent) -> None:
@@ -959,6 +1093,13 @@ class Recorder:
             return
         if _active_run.get() is not run:
             return
+        # ``cubepi.turn`` is one internal agent-loop step. Its input is the
+        # transcript consumed by the step's first model call. Snapshot here
+        # instead of accumulating MessageStart events: tool results are emitted
+        # before the producing TurnEnd, which previously attributed them to the
+        # wrong turn and left the response-after-tool turn with no input.
+        if not run.turn_input_messages:
+            run.turn_input_messages = list(run.transcript)
         ctx = trace.set_span_in_context(run.turn_span)
         attrs: dict[str, Any] = {
             GEN_AI_OPERATION_NAME: OP_CHAT,
@@ -1034,6 +1175,7 @@ class Recorder:
             context=ctx,
             attributes=attrs,
         )
+        self._tracer._adapter_span_start(chat_span)
         run.chat_span = chat_span
         run.chat_open_ns = time.time_ns()
         run.chat_first_chunk_recorded = False
@@ -1177,6 +1319,11 @@ class Recorder:
                     # itself (provider-shaped). Record both the raw
                     # response (JSON dict) for backends that prefer it,
                     # and the normalized output messages where derivable.
+                    output_messages = response_to_semconv_messages(body)
+                    if output_messages:
+                        self._set_content_attr(
+                            span, GEN_AI_OUTPUT_MESSAGES, output_messages
+                        )
                     self._set_content_attr(span, CUBEPI_LLM_RAW_RESPONSE, body)
             # Cooperative abort: providers may finish the response
             # listener with ``exc is None`` and a body whose finish
@@ -1258,6 +1405,7 @@ class Recorder:
             span.set_attribute(key, value)
         else:
             span.set_attribute(key, serialize_for_attribute(value))
+        self._tracer._adapter_content(span, key=key, value=value)
 
     def _find_tool(self, name: str):
         """Look up an :class:`AgentTool` by name on the attached agent.

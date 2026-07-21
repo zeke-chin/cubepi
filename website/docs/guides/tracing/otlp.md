@@ -101,6 +101,55 @@ Datadog also accepts native OTLP HTTP directly — same shape, different URL.
 The OTel collector includes the AWS X-Ray exporter; treat it like any other
 OTLP target.
 
+### Langfuse
+
+Langfuse accepts OTLP/HTTP directly. Add `LangfuseSpanAdapter` so its UI gets
+the backend-specific trace input/output, session, user, and tag attributes while
+CubePi continues to emit the portable `gen_ai.*` attributes.
+
+```python
+import base64
+
+from cubepi.tracing import Tracer, tracing_context
+from cubepi.tracing.adapters import LangfuseSpanAdapter
+from cubepi.tracing.exporters import OTLPSpanExporter
+
+authorization = base64.b64encode(
+    f"{LANGFUSE_PUBLIC_KEY}:{LANGFUSE_SECRET_KEY}".encode()
+).decode()
+
+tracer = Tracer(
+    service_name="my-bot",
+    agent_name="assistant",
+    record_content=True,
+    span_adapters=[LangfuseSpanAdapter()],
+    exporters=[
+        OTLPSpanExporter(
+            endpoint=f"{LANGFUSE_BASE_URL}/api/public/otel/v1/traces",
+            headers={"Authorization": f"Basic {authorization}"},
+        )
+    ],
+)
+
+async with tracer, tracer.attached(agent):
+    with tracing_context(
+        session_id="conversation-123",
+        user_id="user-456",
+        tags=["production"],
+    ):
+        await agent.prompt("Hello")
+```
+
+`record_content=True` is required for prompt and response bodies. Without it,
+session/user/tags and structural spans are still exported, but Langfuse input
+and output remain empty. Apply a `redact` callback before enabling content in a
+service that handles sensitive data.
+
+Do not also enable an Anthropic/OpenAI SDK auto-instrumentor unless you
+specifically want a second SDK-level Generation span below CubePi's `chat`
+span. HTTPX instrumentation is likewise an application-level choice for
+transport diagnostics, not part of the CubePi adapter.
+
 ## Continuing an upstream trace
 
 `Tracer.attach(agent)` currently roots every agent run in its own trace —

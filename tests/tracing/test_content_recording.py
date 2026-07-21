@@ -212,6 +212,55 @@ class TestTurnContent:
         out = _json_attr(turn, "gen_ai.output.messages")
         assert out[0]["role"] == "assistant"
 
+    async def test_tool_loop_turn_input_matches_context_consumed_by_each_step(self):
+        class Params(BaseModel):
+            city: str
+
+        async def run(tool_call_id, params, *, signal=None, on_update=None):
+            return AgentToolResult(content=[TextContent(text="sunny")])
+
+        tool = AgentTool(
+            name="weather",
+            description="get weather",
+            parameters=Params,
+            execute=run,
+        )
+        agent, provider, exporter, tracer = await _build(
+            record_content=True, tools=[tool]
+        )
+        provider.append_responses(
+            [
+                faux_assistant_message(
+                    [
+                        ToolCall(
+                            id="tool-1",
+                            name="weather",
+                            arguments={"city": "Tokyo"},
+                        )
+                    ],
+                    stop_reason="tool_use",
+                ),
+                faux_assistant_message("It is sunny."),
+            ]
+        )
+
+        await agent.prompt("Tokyo weather?")
+        await agent.wait_for_idle()
+        await tracer.shutdown()
+
+        turns = sorted(
+            (span for span in exporter.spans if span.name == "cubepi.turn"),
+            key=lambda span: int(_attrs(span)["cubepi.turn.index"]),
+        )
+        first_input = _json_attr(turns[0], "gen_ai.input.messages")
+        second_input = _json_attr(turns[1], "gen_ai.input.messages")
+        assert [message["role"] for message in first_input] == ["user"]
+        assert [message["role"] for message in second_input] == [
+            "user",
+            "assistant",
+            "tool",
+        ]
+
 
 class TestRootOutputIsOnlyGenerated:
     async def test_root_output_excludes_user_prompts(self):

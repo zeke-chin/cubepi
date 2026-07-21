@@ -384,6 +384,13 @@ async def _run_agent_loop_resume_body(  # pragma: no cover — E2E tested
             set_outcome("complete")
         return new_messages
 
+    # The resumed tool execution above is one completed turn. The next model
+    # call is a distinct turn, so emit its start explicitly before handing off
+    # to ``_run_loop``. ``_run_loop`` assumes its first turn has already been
+    # opened by its caller and therefore intentionally does not emit one on
+    # the first iteration.
+    await emit_event(emit, TurnStartEvent())
+
     # Fall through to the normal loop for the next model turn.
     await _run_loop(
         current_context=current_context,

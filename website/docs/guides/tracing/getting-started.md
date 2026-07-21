@@ -209,14 +209,23 @@ A/B-test arm, anything you'd want to filter by in the backend later:
 from cubepi.tracing import tracing_context
 
 async with tracer.attached(agent):
-    with tracing_context(tags=["beta-arm"], metadata={"user_id": "u-42"}):
+    with tracing_context(
+        tags=["beta-arm"],
+        metadata={"ab_arm": "control"},
+        session_id="session-123",
+        user_id="u-42",
+    ):
         await agent.prompt("Hello.")
 ```
 
 Attributes on the span:
 
 - `cubepi.tags = ("beta-arm",)`
-- `cubepi.metadata.user_id = "u-42"`
+- `cubepi.metadata.ab_arm = "control"`
+
+`session_id` and `user_id` are first-class task-local identity fields. Backend
+adapters such as `LangfuseSpanAdapter` map them to their backend contract;
+ordinary CubePi tracing does not conflate them with arbitrary metadata.
 
 The `cubepi.metadata.*` prefix keeps user keys from clobbering
 recorder-owned schema (e.g. `cubepi.run_id`). Tags and metadata

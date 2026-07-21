@@ -100,6 +100,41 @@ async def test_respond_completes_a_suspended_run():
     assert msgs[-1].content[0].text == "done"
 
 
+async def test_respond_emits_a_new_turn_for_the_post_answer_model_call():
+    """The resumed tool and the model response after it are separate turns."""
+    cp = MemoryCheckpointer()
+    ch = CheckpointedChannel(checkpointer=cp, thread_id="t-turns", run_id="R1")
+    provider = FauxProvider(provider_id="faux")
+    provider.set_responses(_two_turn_bash_responses())
+    agent = Agent(
+        model=provider.model("faux"),
+        tools=[_bash_tool()],
+        middleware=[ApprovalPolicyMiddleware(ch, policy=lambda c: AskUser())],
+        channel=ch,
+        checkpointer=cp,
+        thread_id="t-turns",
+    )
+
+    task = asyncio.create_task(agent.prompt("hi", run_id="R1"))
+    for _ in range(200):
+        if ch.pending is not None:
+            break
+        await asyncio.sleep(0.01)
+    else:
+        pytest.fail("agent did not suspend on HITL")
+    await agent.detach()
+    await task
+
+    events: list[str] = []
+    agent.subscribe(lambda event, signal=None: events.append(event.type))
+    await agent.respond(question_id="tc-1", answer=ApproveAnswer(decision="approve"))
+
+    assert events.count("turn_start") == 2
+    assert events.count("turn_end") == 2
+    first_turn_end = events.index("turn_end")
+    assert events[first_turn_end + 1] == "turn_start"
+
+
 async def test_respond_stale_answer():
     cp = MemoryCheckpointer()
     ch = CheckpointedChannel(checkpointer=cp, thread_id="t-1")
