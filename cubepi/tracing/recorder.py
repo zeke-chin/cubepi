@@ -34,6 +34,7 @@ from opentelemetry.trace import SpanKind, Status, StatusCode
 from cubepi.agent.types import (
     AgentEndEvent,
     AgentStartEvent,
+    AgentSuspendedEvent,
     MessageEndEvent,
     MessageStartEvent,
     TurnEndEvent,
@@ -67,6 +68,7 @@ from cubepi.tracing.schema import (
     CUBEPI_LLM_THINKING_LEVEL,
     CUBEPI_OUTPUT_MESSAGES_COUNT,
     CUBEPI_RUN_ID,
+    CUBEPI_SUSPENDED,
     CUBEPI_TOOL_BLOCK_REASON,
     CUBEPI_TOOL_BLOCKED_BY_HOOK,
     CUBEPI_TOOL_EXECUTION_MODE,
@@ -416,6 +418,8 @@ class Recorder:
                 self._on_turn_end(event)
             elif isinstance(event, AgentEndEvent):
                 self._on_agent_end(event)
+            elif isinstance(event, AgentSuspendedEvent):
+                self._on_agent_suspended(event)
             # MessageUpdateEvent / ToolExecutionUpdateEvent: IGNORED.
         except Exception:
             # Recorders must never crash the agent.
@@ -729,6 +733,121 @@ class Recorder:
         # Final sweep for normal-end (and agent-caught error) paths.
         # Cancellation skips this hook entirely — see
         # ``_sweep_tool_span_tokens`` docstring.
+        self._sweep_tool_span_tokens(run)
+        run.agent_span.end()
+        if run.stream_file is not None:
+            try:
+                run.stream_file.close()
+            except Exception:
+                pass
+            run.stream_file = None
+        self._reset_active_run()
+        self._run = None
+
+    def _on_agent_suspended(self, event: AgentSuspendedEvent) -> None:
+        """Finalize a durable HITL pause without classifying it as an abort.
+
+        ``Agent.detach()`` intentionally ends the current process-local run and
+        a later ``Agent.respond()`` starts a new one. There is no
+        ``AgentEndEvent`` for the paused half, so the recorder must close its
+        spans here; leaving cleanup to ``detach()`` would incorrectly stamp the
+        whole trace as ``cubepi.aborted``.
+        """
+        del event
+        run = self._run
+        if run is None:
+            return
+
+        pending_assistant = next(
+            (
+                message
+                for message in reversed(run.transcript)
+                if getattr(message, "role", None) == "assistant"
+            ),
+            None,
+        )
+        if pending_assistant is not None:
+            if pending_assistant not in run.output_messages:
+                run.output_messages.append(pending_assistant)
+            if pending_assistant not in run.turn_output_messages:
+                run.turn_output_messages.append(pending_assistant)
+
+        for span in list(run.tool_spans.values()):
+            try:
+                span.set_attribute(CUBEPI_SUSPENDED, True)
+                span.end()
+            except Exception:
+                pass
+        run.tool_spans.clear()
+
+        if run.chat_span is not None:
+            try:
+                run.chat_span.set_attribute(CUBEPI_SUSPENDED, True)
+                run.chat_span.end()
+            except Exception:
+                pass
+            run.chat_span = None
+            run.chat_open_ns = None
+            run.chat_first_chunk_recorded = False
+
+        if run.turn_span is not None:
+            try:
+                run.turn_span.set_attribute(CUBEPI_SUSPENDED, True)
+                if pending_assistant is not None:
+                    stop_reason = getattr(pending_assistant, "stop_reason", None)
+                    if stop_reason:
+                        run.turn_span.set_attribute(
+                            CUBEPI_TURN_STOP_REASON, stop_reason
+                        )
+                    tool_calls_count = sum(
+                        1
+                        for content in getattr(pending_assistant, "content", [])
+                        if getattr(content, "type", "") == "tool_call"
+                    )
+                    run.turn_span.set_attribute(
+                        CUBEPI_TURN_TOOL_CALLS_COUNT, tool_calls_count
+                    )
+                if self._record_content:
+                    if run.turn_input_messages:
+                        self._set_content_attr(
+                            run.turn_span,
+                            GEN_AI_INPUT_MESSAGES,
+                            messages_to_semconv(run.turn_input_messages),
+                        )
+                    if run.turn_output_messages:
+                        self._set_content_attr(
+                            run.turn_span,
+                            GEN_AI_OUTPUT_MESSAGES,
+                            messages_to_semconv(run.turn_output_messages),
+                        )
+                run.turn_span.end()
+            except Exception:
+                pass
+            run.turn_span = None
+
+        run.agent_span.set_attribute(CUBEPI_SUSPENDED, True)
+        run.agent_span.set_attribute(
+            CUBEPI_OUTPUT_MESSAGES_COUNT, len(run.output_messages)
+        )
+        if self._record_content:
+            if run.system_prompt:
+                self._set_content_attr(
+                    run.agent_span,
+                    GEN_AI_SYSTEM_INSTRUCTIONS,
+                    system_instructions_to_semconv(run.system_prompt),
+                )
+            if run.input_messages:
+                self._set_content_attr(
+                    run.agent_span,
+                    GEN_AI_INPUT_MESSAGES,
+                    messages_to_semconv(run.input_messages),
+                )
+            if run.output_messages:
+                self._set_content_attr(
+                    run.agent_span,
+                    GEN_AI_OUTPUT_MESSAGES,
+                    messages_to_semconv(run.output_messages),
+                )
         self._sweep_tool_span_tokens(run)
         run.agent_span.end()
         if run.stream_file is not None:

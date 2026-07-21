@@ -105,6 +105,7 @@ CUBEPI_AGENT_SYSTEM_PROMPT_SHA256 = "cubepi.agent.system_prompt.sha256"
 CUBEPI_INPUT_MESSAGES_COUNT = "cubepi.input.messages.count"
 CUBEPI_OUTPUT_MESSAGES_COUNT = "cubepi.output.messages.count"
 CUBEPI_ABORTED = "cubepi.aborted"
+CUBEPI_SUSPENDED = "cubepi.suspended"
 
 # Turn span attributes (cubepi.turn span — no gen_ai.operation.name)
 CUBEPI_TURN_INDEX = "cubepi.turn.index"

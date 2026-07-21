@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
+import pytest
 from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
 from opentelemetry.trace import SpanKind, StatusCode
@@ -19,7 +20,13 @@ from cubepi.agent.types import (
     AgentToolResult,
     BeforeToolCallResult,
 )
-from cubepi.providers.base import BoundModel, Model, TextContent, ToolCall
+from cubepi.providers.base import (
+    AssistantMessage,
+    BoundModel,
+    Model,
+    TextContent,
+    ToolCall,
+)
 from cubepi.providers.faux import FauxProvider, faux_assistant_message
 from cubepi.tracing import Tracer
 
@@ -193,6 +200,102 @@ class TestTurnSpan:
         assert len(turns) == 2
         assert _attrs(turns[0])["cubepi.turn.index"] == 0
         assert _attrs(turns[1])["cubepi.turn.index"] == 1
+
+
+class TestHitlPauseResume:
+    async def test_pause_is_suspended_and_resume_traces_final_model_turn(self):
+        from cubepi.checkpointer.memory import MemoryCheckpointer
+        from cubepi.hitl.ask_user import ask_user_tool
+        from cubepi.hitl.channel import CheckpointedChannel
+
+        checkpointer = MemoryCheckpointer()
+        channel = CheckpointedChannel(
+            checkpointer=checkpointer,
+            thread_id="trace-hitl",
+            run_id="R1",
+        )
+        provider = FauxProvider(provider_id="faux")
+        provider.set_responses(
+            [
+                AssistantMessage(
+                    content=[
+                        ToolCall(
+                            id="ask-1",
+                            name="ask_user",
+                            arguments={
+                                "questions": [{"key": "unit", "prompt": "Unit?"}]
+                            },
+                        )
+                    ],
+                    stop_reason="tool_use",
+                ),
+                AssistantMessage(
+                    content=[TextContent(text="Celsius selected")],
+                    stop_reason="stop",
+                ),
+            ]
+        )
+        agent = Agent(
+            model=provider.model(MODEL.id),
+            tools=[ask_user_tool(channel)],
+            channel=channel,
+            checkpointer=checkpointer,
+            thread_id="trace-hitl",
+        )
+        exporter = InMemoryExporter()
+        tracer = Tracer(
+            service_name="test-svc",
+            agent_name="test-agent",
+            record_content=True,
+            exporters=[exporter],
+        )
+        tracer.attach(agent)
+
+        prompt_task = asyncio.create_task(agent.prompt("Choose a unit", run_id="R1"))
+        for _ in range(200):
+            loaded = await checkpointer.load_pending("trace-hitl")
+            if loaded is not None:
+                break
+            await asyncio.sleep(0.01)
+        else:
+            pytest.fail("agent did not suspend on ask_user")
+
+        pending, _ = loaded
+        await agent.detach()
+        await prompt_task
+        await agent.respond(question_id=pending.question_id, answer={"unit": "celsius"})
+        await tracer.shutdown()
+
+        roots = sorted(
+            [span for span in exporter.spans if span.name == "invoke_agent"],
+            key=lambda span: span.start_time or 0,
+        )
+        assert len(roots) == 2
+        paused_attrs = _attrs(roots[0])
+        assert paused_attrs["cubepi.suspended"] is True
+        assert "cubepi.aborted" not in paused_attrs
+        assert "error.type" not in paused_attrs
+        assert "Choose a unit" in paused_attrs["gen_ai.input.messages"]
+        assert "ask_user" in paused_attrs["gen_ai.output.messages"]
+
+        chats = [span for span in exporter.spans if span.name.startswith("chat ")]
+        assert len(chats) == 2
+        assert "Celsius selected" in _attrs(chats[-1])["gen_ai.output.messages"]
+
+        turns = [span for span in exporter.spans if span.name == "cubepi.turn"]
+        assert len(turns) == 3
+        paused_turn = next(
+            span for span in turns if _attrs(span).get("cubepi.suspended") is True
+        )
+        assert "ask_user" in _attrs(paused_turn)["gen_ai.output.messages"]
+
+        ask_span = next(
+            span
+            for span in exporter.spans
+            if span.name == "execute_tool ask_user"
+            and _attrs(span).get("cubepi.suspended") is True
+        )
+        assert "cubepi.aborted" not in _attrs(ask_span)
 
 
 class TestExecuteToolSpan:
